@@ -19,6 +19,28 @@ const custName = (id) => { const c = get('customers', id); return c ? `${c.first
 const custLink = (id) => (id ? `<a href="#/customers/${id}">${esc(custName(id))}</a>` : '<span class="muted">no customer</span>');
 const orderLink = (id) => { const o = get('orders', id); return o ? `<a href="#/orders/${o.id}">${esc(o.name)}</a>` : esc(id); };
 const locLabel = (id) => get('locations', id)?.name ?? id;
+const initials = (s) => String(s || '?').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// Line icons (20×20, stroked with currentColor) used inside the views.
+const ICON_PATHS = {
+  cart: '<path d="M3.5 6.5h13l-1.2 9.2a1.5 1.5 0 0 1-1.5 1.3H6.2a1.5 1.5 0 0 1-1.5-1.3z"/><path d="M7 8.5V5.5a3 3 0 0 1 6 0v3"/>',
+  money: '<rect x="2.5" y="5" width="15" height="10" rx="1.5"/><circle cx="10" cy="10" r="2.2"/><path d="M5.5 8v4M14.5 8v4"/>',
+  avg: '<path d="M3 15l4.5-5 3 3L17 6"/><path d="M13 6h4v4"/>',
+  people: '<circle cx="7.5" cy="7.5" r="2.7"/><path d="M2.8 16a4.7 4.7 0 0 1 9.4 0"/><path d="M12.5 5a2.5 2.5 0 0 1 0 5M14.5 16a4.7 4.7 0 0 0-1.6-3.5"/>',
+  box: '<path d="M10 2.8l6.5 3.4v7.6L10 17.2l-6.5-3.4V6.2z"/><path d="M3.5 6.2L10 9.6l6.5-3.4M10 9.6v7.6"/>',
+  plus: '<path d="M10 4.5v11M4.5 10h11"/>',
+  search: '<circle cx="8.5" cy="8.5" r="5"/><path d="M12.3 12.3L17 17"/>',
+  tag: '<path d="M10.5 3H16a1 1 0 0 1 1 1v5.5L9.8 16.7a1 1 0 0 1-1.4 0l-5.1-5.1a1 1 0 0 1 0-1.4z"/><circle cx="13.3" cy="6.7" r="1.2"/>',
+  back: '<path d="M12 5l-5 5 5 5"/>',
+  ext: '<path d="M11 4h5v5M16 4l-7 7"/><path d="M14 11.5V16H4V6h4.5"/>',
+};
+const icon = (name) => `<svg class="i" viewBox="0 0 20 20" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
+const STOCK_LOW = 10;
+const stockPill = (n) => (n <= 0 ? '<span class="pill out-of-stock">Out of stock</span>' : n < STOCK_LOW ? '<span class="pill low-stock">Low stock</span>' : '<span class="pill in-stock">In stock</span>');
+const swatchColor = (id) => { const h = (200 + (C.hashSeed(id) % 170)) % 360; return `hsl(${h} 45% 42%)`; }; // blues→purples→reds→oranges
+const thumb = (id, title) => `<span class="thumb" style="background:${swatchColor(id)}">${esc(String(title).split(' ').map((w) => w[0]).join('').slice(0, 2))}</span>`;
+const avatar = (id, name) => `<span class="thumb" style="background:${swatchColor(id)};border-radius:50%">${esc(initials(name))}</span>`;
 
 const ui = {
   store: localStorage.getItem('cartwright:ui:store') || 'STO-1',
@@ -100,20 +122,38 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onMount }) {
 const submit = (type, params, okMsg) => { const r = cw.dispatch(type, params); if (r.ok) { toast(okMsg); setTimeout(render); } return r; };
 
 // ---- table helper ---------------------------------------------------------------------
-function table(key, rows, columns, { pageSize = 50, href } = {}) {
-  const pageNo = Math.min(ui.pages[key] || 0, Math.max(0, Math.ceil(rows.length / pageSize) - 1));
+/** Page numbers to show: first, last, and a window around the current page, with gaps as null. */
+function pageList(cur, count) {
+  const want = new Set([0, count - 1, cur - 1, cur, cur + 1].filter((p) => p >= 0 && p < count));
+  const out = [];
+  [...want].sort((a, b) => a - b).forEach((p, i, arr) => { if (i && p - arr[i - 1] > 1) out.push(null); out.push(p); });
+  return out;
+}
+function table(key, rows, columns, { pageSize = 25, href, empty = 'Nothing here yet.', noun = 'row' } = {}) {
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const pageNo = Math.min(ui.pages[key] || 0, pages - 1);
   const slice = rows.slice(pageNo * pageSize, pageNo * pageSize + pageSize);
-  const html = `<div class="table-wrap"><table><thead><tr>${columns.map((c) => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('')}</tr></thead>
-    <tbody>${slice.map((r) => `<tr${href ? ` data-href="${esc(href(r))}" style="cursor:pointer"` : ''}>${columns.map((c) => `<td class="${c.num ? 'num' : ''}">${c.render(r)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${columns.length}" class="muted">Nothing here.</td></tr>`}</tbody></table></div>
-    ${rows.length > pageSize ? `<div class="pager" data-pager="${key}">${rows.length} rows · page ${pageNo + 1} / ${Math.ceil(rows.length / pageSize)}
-      <button class="btn small" data-page="-1"${pageNo === 0 ? ' disabled' : ''}>‹ Prev</button>
-      <button class="btn small" data-page="1"${(pageNo + 1) * pageSize >= rows.length ? ' disabled' : ''}>Next ›</button></div>` : `<div class="pager">${rows.length} rows</div>`}`;
+  const cls = (c) => [c.num ? 'num' : '', c.cls || ''].join(' ').trim();
+  const from = rows.length ? pageNo * pageSize + 1 : 0;
+  const to = Math.min(rows.length, (pageNo + 1) * pageSize);
+  const html = `<div class="table-wrap"><table><thead><tr>${columns.map((c) => `<th class="${cls(c)}">${esc(c.label)}</th>`).join('')}</tr></thead>
+    <tbody>${slice.map((r) => `<tr${href ? ` data-href="${esc(href(r))}"` : ''}>${columns.map((c) => `<td class="${cls(c)}">${c.render(r)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${columns.length}" class="empty">${esc(empty)}</td></tr>`}</tbody></table></div>
+    ${rows.length > pageSize ? `<div class="pager" data-pager="${key}"><span>Showing ${from}–${to} of ${rows.length} ${noun}s</span><span class="pages">
+      <button class="btn small" data-page="-1"${pageNo === 0 ? ' disabled' : ''} aria-label="Previous page">‹</button>
+      ${pageList(pageNo, pages).map((p) => (p == null ? '<span class="gap">…</span>' : `<button class="btn small${p === pageNo ? ' on' : ''}" data-goto="${p}"${p === pageNo ? ' aria-current="page"' : ''}>${p + 1}</button>`)).join('')}
+      <button class="btn small" data-page="1"${pageNo + 1 >= pages ? ' disabled' : ''} aria-label="Next page">›</button></span></div>`
+    : rows.length ? `<div class="pager"><span>${plural(rows.length, noun)}</span></div>` : ''}`;
   return { html, wire(root) {
     $$(`[data-pager="${key}"] [data-page]`, root).forEach((b) => { b.onclick = () => { ui.pages[key] = pageNo + Number(b.dataset.page); render(); }; });
+    $$(`[data-pager="${key}"] [data-goto]`, root).forEach((b) => { b.onclick = () => { ui.pages[key] = Number(b.dataset.goto); render(); }; });
     if (href) $$('[data-href]', root).forEach((tr) => { tr.onclick = (e) => { if (!e.target.closest('a,button,input,select')) location.hash = tr.dataset.href; }; });
   } };
 }
-const tabs = (key, options, current) => `<div class="tabs" data-tabs="${key}">${options.map(([v, l]) => `<button data-v="${esc(v)}" class="${v === current ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
+const tabs = (key, options, current, extra = '') => `<div class="tabs${extra ? ` ${extra}` : ''}" data-tabs="${key}">${options.map(([v, l]) => `<button data-v="${esc(v)}" class="${v === current ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
+const cardTabs = (key, options, current) => tabs(key, options, current, 'card-tabs');
+/** A full-bleed card: optional tabs strip, optional filter toolbar, then the table. */
+const tableCard = (t, { tabsHtml = '', toolbar = '', title = '' } = {}) => `<div class="card flush">${title ? `<h2>${title}</h2>` : ''}${tabsHtml}${toolbar ? `<div class="card-toolbar">${toolbar}</div>` : ''}${t.html}</div>`;
+const btnIcon = (id, label, name = 'plus', cls = 'primary') => `<button class="btn ${cls}" id="${id}">${icon(name)}${esc(label)}</button>`;
 function wireFilters(root) {
   $$('[data-tabs]', root).forEach((t) => $$('button', t).forEach((b) => { b.onclick = () => { ui.f[t.dataset.tabs] = b.dataset.v; ui.pages = {}; render(); }; }));
   $$('[data-filter]', root).forEach((el) => {
@@ -122,6 +162,7 @@ function wireFilters(root) {
   });
 }
 const filterInput = (key, placeholder) => `<input data-filter="${key}" placeholder="${esc(placeholder)} (Enter)" value="${esc(ui.f[key] || '')}">`;
+const searchInput = (key, placeholder) => `<span class="search-field">${icon('search')}${filterInput(key, placeholder)}</span>`;
 
 /** Parse "SKU x 2" / "SKU, 2" / "SKU 2" lines into [{sku, quantity}]. */
 function parseLines(text) {
@@ -184,24 +225,43 @@ PAGES.home = () => {
   const toCapture = n({ status: 'open', financialStatus: 'authorized' });
   const unpaid = n({ status: 'open', financialStatus: 'pending' });
   const returns = Q('listReturns', { storeId: sid, status: 'requested', limit: 0 }).total;
+  const lowStock = Q('listVariants', { storeId: sid, lowStock: STOCK_LOW, limit: 6 });
+  const recent = Q('listOrders', { storeId: sid, limit: 8 }).items;
+  const kpi = (ic, label, value, sub, amber = false) => `<div class="tile"><div class="label"><span class="ic${amber ? ' amber' : ''}">${icon(ic)}</span>${label}</div><div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+  const todo = (go, href, label, count) => `<li><a href="${href}"${go ? ` data-go="${go}"` : ''}><span class="count${count ? ' hot' : ''}">${count}</span><span class="grow">${label}</span><span class="muted">›</span></a></li>`;
+  const recentTable = `<div class="table-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Payment</th><th>Fulfillment</th><th class="num">Total</th></tr></thead><tbody>
+    ${recent.map((o) => `<tr data-href="#/orders/${o.id}"><td><a class="cell-title" href="#/orders/${o.id}">${esc(o.name)}</a><div class="muted tiny">${when(o.createdAt)}</div></td><td>${esc(custName(o.customerId))}</td><td>${pill(o.financialStatus)}</td><td>${pill(o.fulfillmentStatus)}</td><td class="num">${money(o.totalCents)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No orders yet.</td></tr>'}
+  </tbody></table></div>`;
   return {
-    title: `Home · ${store().name}`,
+    title: 'Home',
+    subtitle: `Here's what's happening at ${esc(store().name)} over the last 30 days.`,
+    actions: `<a class="btn" href="#/analytics">View analytics</a>${btnIcon('home-new-order', 'Create order')}`,
     html: `<div class="tiles">
-      <a class="tile" href="#/orders" data-go="ship"><div class="label">Orders to fulfill</div><div class="value">${toShip}</div><div class="sub">paid &amp; unfulfilled</div></a>
-      <a class="tile" href="#/orders" data-go="capture"><div class="label">Payments to capture</div><div class="value">${toCapture}</div><div class="sub">authorized</div></a>
-      <a class="tile" href="#/orders" data-go="unpaid"><div class="label">Awaiting payment</div><div class="value">${unpaid}</div><div class="sub">pending</div></a>
-      <a class="tile" href="#/returns"><div class="label">Return requests</div><div class="value">${returns}</div><div class="sub">to review</div></a>
+      ${kpi('money', 'Total sales', money(sum.totalSalesCents), `net ${money(sum.netSalesCents)}`)}
+      ${kpi('cart', 'Orders', sum.orders, 'last 30 days')}
+      ${kpi('avg', 'Average order value', money(sum.averageOrderValueCents), 'per order', true)}
+      ${kpi('people', 'Returning customers', `${(sum.returningCustomerRate * 100).toFixed(1)}%`, 'of ordering customers', true)}
     </div>
-    <div class="tiles">
-      <div class="tile"><div class="label">Total sales · 30 days</div><div class="value">${money(sum.totalSalesCents)}</div></div>
-      <div class="tile"><div class="label">Orders · 30 days</div><div class="value">${sum.orders}</div></div>
-      <div class="tile"><div class="label">Average order value</div><div class="value">${money(sum.averageOrderValueCents)}</div></div>
-      <div class="tile"><div class="label">Returning customer rate</div><div class="value">${(sum.returningCustomerRate * 100).toFixed(1)}%</div></div>
-    </div>
-    <div class="card"><h2>Net sales by day · last 30 days</h2>${columnChart(sales.rows, { value: (r) => r.netSalesCents, label: (r) => r.period, fmt: shortMoney, title: 'Net sales by day' })}</div>`,
+    <div class="layout"><div>
+      <div class="card"><h2>Net sales by day <span class="muted tiny">last 30 days</span></h2>${columnChart(sales.rows, { value: (r) => r.netSalesCents, label: (r) => r.period, fmt: shortMoney, title: 'Net sales by day' })}</div>
+      <div class="card flush"><h2>Recent orders <a class="tiny" href="#/orders" data-go="all">View all</a></h2>${recentTable}</div>
+    </div><div>
+      <div class="card"><h2>To do</h2><ul class="todo">
+        ${todo('ship', '#/orders', 'Orders to fulfill', toShip)}
+        ${todo('capture', '#/orders', 'Payments to capture', toCapture)}
+        ${todo('unpaid', '#/orders', 'Orders awaiting payment', unpaid)}
+        ${todo('', '#/returns', 'Return requests to review', returns)}
+      </ul></div>
+      <div class="card"><h2>Low stock <a class="tiny" href="#/inventory">Inventory</a></h2>
+        ${lowStock.items.map((v) => `<div class="with-thumb" style="margin-bottom:var(--s-3)">${thumb(v.productId, v.productTitle)}<div style="flex:1;min-width:0"><a href="#/products/${v.productId}">${esc(v.productTitle)}</a><div class="muted tiny">${esc(v.title)} · ${esc(v.sku)}</div></div><span class="pill ${v.totalAvailable <= 0 ? 'out-of-stock' : 'low-stock'}">${v.totalAvailable}</span></div>`).join('') || '<p class="muted">Everything is well stocked.</p>'}
+        ${lowStock.total > lowStock.items.length ? `<p class="muted tiny">+ ${lowStock.total - lowStock.items.length} more variants below ${STOCK_LOW}</p>` : ''}
+      </div>
+    </div></div>`,
     wire(root) {
       wireChart(root);
       $$('[data-go]', root).forEach((a) => { a.onclick = () => { ui.f.orderTab = a.dataset.go; }; });
+      $$('[data-href]', root).forEach((tr) => { tr.onclick = (e) => { if (!e.target.closest('a')) location.hash = tr.dataset.href; }; });
+      $('#home-new-order', root).onclick = () => newOrderForm();
     },
   };
 };
@@ -217,20 +277,21 @@ PAGES.orders = () => {
   if (['open', 'closed', 'cancelled'].includes(tab)) p.status = tab;
   const rows = Q('listOrders', p).items;
   const t = table('orders', rows, [
-    { label: 'Order', render: (o) => `<a href="#/orders/${o.id}"><strong>${esc(o.name)}</strong></a>` },
-    { label: 'Date', render: (o) => when(o.createdAt) },
+    { label: 'Order', render: (o) => `<a class="cell-title" href="#/orders/${o.id}">${esc(o.name)}</a>` },
+    { label: 'Date', cls: 'nowrap', render: (o) => when(o.createdAt) },
     { label: 'Customer', render: (o) => esc(custName(o.customerId)) },
-    { label: 'Total', num: true, render: (o) => money(o.totalCents) },
     { label: 'Payment', render: (o) => pill(o.financialStatus) },
     { label: 'Fulfillment', render: (o) => pill(o.fulfillmentStatus) },
     { label: 'Status', render: (o) => pill(o.status) },
-    { label: 'Items', num: true, render: (o) => o.lineItems.reduce((a, l) => a + l.quantity, 0) },
     { label: 'Tags', render: (o) => tagsHtml(o.tags) },
-  ], { href: (o) => `#/orders/${o.id}` });
+    { label: 'Items', num: true, render: (o) => o.lineItems.reduce((a, l) => a + l.quantity, 0) },
+    { label: 'Total', num: true, render: (o) => `<strong>${money(o.totalCents)}</strong>` },
+  ], { href: (o) => `#/orders/${o.id}`, noun: 'order', empty: 'No orders match these filters.' });
   return {
     title: 'Orders',
-    html: `<div class="toolbar">${tabs('orderTab', ORDER_TABS, tab)} ${filterInput('orderQ', 'Order # or email')} ${filterInput('orderTag', 'Tag')}
-      <span style="flex:1"></span><button class="btn primary" id="new-order">Create order</button></div><div class="card">${t.html}</div>`,
+    subtitle: `${plural(rows.length, 'order')} in ${esc(store().name)}`,
+    actions: btnIcon('new-order', 'Create order'),
+    html: tableCard(t, { tabsHtml: cardTabs('orderTab', ORDER_TABS, tab), toolbar: `${searchInput('orderQ', 'Order # or email')} ${filterInput('orderTag', 'Tag')}` }),
     wire(root) { wireFilters(root); t.wire(root); $('#new-order', root).onclick = () => newOrderForm(); },
   };
 };
@@ -346,26 +407,31 @@ PAGES.order = (id) => {
   if (o.status === 'closed') btns.push(B('reopen', 'Unarchive'));
   if (open && o.lineItems.every((l) => l.fulfilledQty === 0)) btns.push(B('cancel', 'Cancel order', 'danger'));
   const addr = o.shippingAddress;
-  const html = `<div class="card"><div class="actions">${btns.join('')}</div></div>
-  <div class="grid2"><div>
-    <div class="card"><h2>Items <span>${pill(o.fulfillmentStatus)}</span></h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th class="num">Price</th><th class="num">Qty</th><th class="num">Discount</th><th class="num">Fulfilled</th><th class="num">Refunded</th><th class="num">To ship</th></tr></thead><tbody>
-      ${o.lineItems.map((l) => `<tr><td><a href="#/products/${l.productId}">${esc(l.title)}</a><div class="muted tiny">${esc(l.variantTitle)}</div></td><td>${esc(l.sku)}</td><td class="num">${money(l.priceCents)}</td><td class="num">${l.quantity}</td><td class="num">${l.discountCents ? `−${money(l.discountCents)}` : ''}</td><td class="num">${l.fulfilledQty}</td><td class="num">${l.refundedQty || ''}</td><td class="num">${l.fulfillableQty}</td></tr>`).join('')}
+  const skuOf = (lid) => esc(o.lineItems.find((l) => l.id === lid).sku);
+  const units = o.lineItems.reduce((a, l) => a + l.quantity, 0);
+  const html = `<div class="layout"><div>
+    <div class="card flush"><h2>Items <span>${pill(o.fulfillmentStatus)}</span></h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th class="num">Price</th><th class="num">Qty</th><th class="num">Discount</th><th class="num">Fulfilled</th><th class="num">Refunded</th><th class="num">To ship</th><th class="num">Line total</th></tr></thead><tbody>
+      ${o.lineItems.map((l) => `<tr><td><div class="with-thumb">${thumb(l.productId, l.title)}<div><a href="#/products/${l.productId}">${esc(l.title)}</a><div class="muted tiny">${esc(l.variantTitle)}</div></div></div></td><td class="muted nowrap">${esc(l.sku)}</td><td class="num">${money(l.priceCents)}</td><td class="num">${l.quantity}</td><td class="num">${l.discountCents ? `−${money(l.discountCents)}` : ''}</td><td class="num">${l.fulfilledQty}</td><td class="num">${l.refundedQty || ''}</td><td class="num">${l.fulfillableQty}</td><td class="num">${money(l.priceCents * l.quantity - (l.discountCents || 0))}</td></tr>`).join('')}
     </tbody></table></div></div>
-    <div class="card"><h2>Payment <span>${pill(o.financialStatus)}</span></h2><dl class="kv">
-      <dt>Subtotal</dt><dd>${money(o.subtotalCents)}</dd>
-      <dt>Discount</dt><dd>${o.discountCode ? `${esc(o.discountCode)} · −${money(o.discountCents + o.shippingDiscountCents)}` : '—'}</dd>
-      <dt>Shipping</dt><dd>${esc(C.SHIPPING_LABELS[o.shippingMethod])} · ${money(o.shippingCents - o.shippingDiscountCents)}</dd>
+    <div class="card"><h2>Payment <span>${pill(o.financialStatus)}</span></h2><dl class="sum">
+      <dt>Subtotal <span class="muted tiny">${plural(units, 'item')}</span></dt><dd>${money(o.subtotalCents)}</dd>
+      <dt>Discount ${o.discountCode ? `<span class="tag">${esc(o.discountCode)}</span>` : ''}</dt><dd>${o.discountCode ? `−${money(o.discountCents + o.shippingDiscountCents)}` : '—'}</dd>
+      <dt>Shipping <span class="muted tiny">${esc(C.SHIPPING_LABELS[o.shippingMethod])}</span></dt><dd>${money(o.shippingCents - o.shippingDiscountCents)}</dd>
       <dt>Tax</dt><dd>${money(o.taxCents)}</dd>
-      <dt><strong>Total</strong></dt><dd><strong>${money(o.totalCents)}</strong></dd>
-      <dt>Paid</dt><dd>${money(o.money.paidCents)}</dd>
-      <dt>Refunded</dt><dd>${money(o.money.refundedCents)}</dd>
-      <dt>Net payment</dt><dd>${money(o.money.netPaidCents)}</dd>
+      <dt class="total">Total</dt><dd class="total">${money(o.totalCents)}</dd>
+      <div class="sep"></div>
+      <dt>Paid by customer</dt><dd>${money(o.money.paidCents)}</dd>
+      <dt>Refunded</dt><dd>${o.money.refundedCents ? `−${money(o.money.refundedCents)}` : money(0)}</dd>
+      <dt><strong>Net payment</strong></dt><dd><strong>${money(o.money.netPaidCents)}</strong></dd>
     </dl></div>
-    <div class="card"><h2>Fulfillments</h2>${o.fulfillments.length ? `<table><thead><tr><th>ID</th><th>Date</th><th>Items</th><th>Tracking</th><th>Status</th><th></th></tr></thead><tbody>${o.fulfillments.map((f) => `<tr><td>${f.id}</td><td>${when(f.createdAt)}</td><td>${f.lineItems.map((x) => `${x.quantity} × ${esc(o.lineItems.find((l) => l.id === x.lineItemId).sku)}`).join('<br>')}</td><td>${f.trackingNumber ? `${esc(f.trackingCompany)} ${f.trackingUrl ? `<a href="${esc(f.trackingUrl)}" target="_blank" rel="noopener">${esc(f.trackingNumber)}</a>` : esc(f.trackingNumber)}` : '<span class="muted">none</span>'}</td><td>${pill(f.status)}</td><td>${f.status === 'success' ? `<button class="btn small" data-track="${f.id}">Edit tracking</button> <button class="btn small danger" data-fcancel="${f.id}">Cancel</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No fulfillments yet.</p>'}</div>
-    <div class="card"><h2>Returns</h2>${o.returns.length ? `<table><thead><tr><th>ID</th><th>Created</th><th>Items</th><th>Status</th><th></th></tr></thead><tbody>${o.returns.map((r) => `<tr><td>${r.id}</td><td>${when(r.createdAt)}</td><td>${r.lineItems.map((x) => `${x.quantity} × ${esc(o.lineItems.find((l) => l.id === x.lineItemId).sku)} <span class="muted tiny">(${esc(x.reason.replace(/_/g, ' '))})</span>`).join('<br>')}</td><td>${pill(r.status)}</td><td>${r.status === 'requested' ? `<button class="btn small primary" data-rapprove="${r.id}">Approve</button> <button class="btn small danger" data-rdecline="${r.id}">Decline</button>` : r.status === 'open' ? `<button class="btn small primary" data-rrefund="${r.id}">Refund…</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No returns.</p>'}</div>
-    <div class="card"><h2>Refunds</h2>${o.refunds.length ? `<table><thead><tr><th>ID</th><th>Date</th><th>Items</th><th class="num">Shipping</th><th class="num">Amount</th><th>Reason</th></tr></thead><tbody>${o.refunds.map((r) => `<tr><td>${r.id}</td><td>${when(r.createdAt)}</td><td>${r.lineItems.map((x) => `${x.quantity} × ${esc(o.lineItems.find((l) => l.id === x.lineItemId).sku)}${x.restock ? ` <span class="muted tiny">restocked @ ${esc(locLabel(x.locationId))}</span>` : ''}`).join('<br>') || '—'}</td><td class="num">${money(r.shippingCents)}</td><td class="num">${money(r.amountCents)}</td><td>${esc(r.reason.replace(/_/g, ' '))}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No refunds.</p>'}</div>
+    <div class="card flush"><h2>Fulfillments</h2>${o.fulfillments.length ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Date</th><th>Items</th><th>Tracking</th><th>Status</th><th></th></tr></thead><tbody>${o.fulfillments.map((f) => `<tr><td>${f.id}</td><td>${when(f.createdAt)}</td><td>${f.lineItems.map((x) => `${x.quantity} × ${skuOf(x.lineItemId)}`).join('<br>')}</td><td>${f.trackingNumber ? `${esc(f.trackingCompany)} ${f.trackingUrl ? `<a href="${esc(f.trackingUrl)}" target="_blank" rel="noopener">${esc(f.trackingNumber)}</a>` : esc(f.trackingNumber)}` : '<span class="muted">none</span>'}</td><td>${pill(f.status)}</td><td class="num">${f.status === 'success' ? `<span class="inline-save"><button class="btn small" data-track="${f.id}">Edit tracking</button><button class="btn small danger" data-fcancel="${f.id}">Cancel</button></span>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="card-section muted">No fulfillments yet.</div>'}</div>
+    <div class="card flush"><h2>Returns</h2>${o.returns.length ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Created</th><th>Items</th><th>Status</th><th></th></tr></thead><tbody>${o.returns.map((r) => `<tr><td>${r.id}</td><td>${when(r.createdAt)}</td><td>${r.lineItems.map((x) => `${x.quantity} × ${skuOf(x.lineItemId)} <span class="muted tiny">(${esc(x.reason.replace(/_/g, ' '))})</span>`).join('<br>')}</td><td>${pill(r.status)}</td><td class="num">${r.status === 'requested' ? `<span class="inline-save"><button class="btn small primary" data-rapprove="${r.id}">Approve</button><button class="btn small danger" data-rdecline="${r.id}">Decline</button></span>` : r.status === 'open' ? `<button class="btn small primary" data-rrefund="${r.id}">Refund…</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="card-section muted">No returns.</div>'}</div>
+    <div class="card flush"><h2>Refunds</h2>${o.refunds.length ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Date</th><th>Items</th><th>Reason</th><th class="num">Shipping</th><th class="num">Amount</th></tr></thead><tbody>${o.refunds.map((r) => `<tr><td>${r.id}</td><td>${when(r.createdAt)}</td><td>${r.lineItems.map((x) => `${x.quantity} × ${skuOf(x.lineItemId)}${x.restock ? ` <span class="muted tiny">restocked @ ${esc(locLabel(x.locationId))}</span>` : ''}`).join('<br>') || '—'}</td><td>${esc(r.reason.replace(/_/g, ' '))}</td><td class="num">${money(r.shippingCents)}</td><td class="num">${money(r.amountCents)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="card-section muted">No refunds.</div>'}</div>
   </div><div>
-    <div class="card"><h2>Order</h2><dl class="kv">
+    <div class="card"><h2>Customer</h2>
+      ${o.customerId ? `<div class="with-thumb">${avatar(o.customerId, custName(o.customerId))}<div>${custLink(o.customerId)}<div class="muted tiny">${esc(o.email)}</div></div></div>` : `<p>${custLink(o.customerId)}<br><span class="muted">${esc(o.email)}</span></p>`}
+      <h3>Shipping address</h3><div class="addr">${addr ? `${esc(addr.name)}<br>${esc(addr.address1)}<br>${esc(addr.city)}, ${esc(addr.province)} ${esc(addr.zip)}<br>${esc(addr.country)}` : '<span class="muted">Local pickup</span>'}</div></div>
+    <div class="card"><h2>Order details</h2><dl class="kv">
       <dt>Status</dt><dd>${pill(o.status)}${o.cancelReason ? ` <span class="muted tiny">${esc(o.cancelReason)}</span>` : ''}</dd>
       <dt>Placed</dt><dd>${when(o.createdAt)}</dd>
       <dt>Channel</dt><dd>${esc(o.source.replace('_', ' '))}</dd>
@@ -374,13 +440,14 @@ PAGES.order = (id) => {
       <dt>Note</dt><dd>${o.note ? esc(o.note) : '<span class="muted">—</span>'}</dd>
       <dt>ID</dt><dd class="muted">${o.id}</dd>
     </dl></div>
-    <div class="card"><h2>Customer</h2><p>${custLink(o.customerId)}<br><span class="muted">${esc(o.email)}</span></p>
-      <h2>Shipping address</h2><p>${addr ? `${esc(addr.name)}<br>${esc(addr.address1)}<br>${esc(addr.city)}, ${esc(addr.province)} ${esc(addr.zip)}<br>${esc(addr.country)}` : '<span class="muted">Local pickup</span>'}</p></div>
-    <div class="card"><h2>Timeline</h2>${o.transactions.map((t) => `<div class="tiny"><strong>${esc(t.kind)}</strong> ${t.amountCents ? money(t.amountCents) : ''} · ${esc(t.gateway)} <span class="muted">${when(t.createdAt)}</span></div>`).join('') || '<p class="muted">No transactions.</p>'}</div>
+    <div class="card"><h2>Timeline</h2>${o.transactions.length ? `<ul class="timeline">${o.transactions.map((t) => `<li><strong style="text-transform:capitalize">${esc(t.kind)}</strong> ${t.amountCents ? money(t.amountCents) : ''} <span class="muted">· ${esc(t.gateway)}</span><div class="muted tiny">${when(t.createdAt)}</div></li>`).join('')}</ul>` : '<p class="muted">No transactions.</p>'}</div>
   </div></div>`;
   return {
     title: `Order ${o.name}`,
-    titleHtml: `<a href="#/orders">Orders</a> › ${esc(o.name)} ${pill(o.financialStatus)} ${pill(o.fulfillmentStatus)}`,
+    titleHtml: `${esc(o.name)} ${pill(o.financialStatus)} ${pill(o.fulfillmentStatus)}`,
+    crumbs: [['Orders', '#/orders']],
+    subtitle: `${when(o.createdAt)} · ${esc(o.source.replace('_', ' '))} · ${esc(o.email)}`,
+    actions: [...btns.filter((b) => !b.includes('primary')), ...btns.filter((b) => b.includes('primary'))].join(''),
     html,
     wire(root) {
       const on = (k, fn) => { const b = $(`[data-a="${k}"]`, root); if (b) b.onclick = fn; };
@@ -411,14 +478,20 @@ PAGES.returns = () => {
   const tab = ui.f.returnTab || 'requested';
   const rows = Q('listReturns', { storeId: ui.store, status: tab === 'all' ? undefined : tab }).items;
   const t = table('returns', rows, [
-    { label: 'Return', render: (r) => r.id },
+    { label: 'Return', render: (r) => `<span class="cell-title">${r.id}</span>` },
     { label: 'Order', render: (r) => orderLink(r.orderId) },
     { label: 'Customer', render: (r) => custLink(r.customerId) },
-    { label: 'Created', render: (r) => when(r.createdAt) },
+    { label: 'Created', cls: 'nowrap', render: (r) => when(r.createdAt) },
     { label: 'Items', render: (r) => r.lineItems.map((x) => `${x.quantity} × ${esc(get('orders', r.orderId).lineItems.find((l) => l.id === x.lineItemId).sku)} <span class="muted tiny">${esc(x.reason.replace(/_/g, ' '))}</span>`).join('<br>') },
     { label: 'Status', render: (r) => pill(r.status) },
-  ], { href: (r) => `#/orders/${r.orderId}` });
-  return { title: 'Returns', html: `<div class="toolbar">${tabs('returnTab', [['requested', 'Requested'], ['open', 'Open'], ['closed', 'Closed'], ['declined', 'Declined'], ['all', 'All']], tab)}</div><div class="card">${t.html}</div>`, wire(root) { wireFilters(root); t.wire(root); } };
+  ], { href: (r) => `#/orders/${r.orderId}`, noun: 'return', empty: 'No returns in this view.' });
+  return {
+    title: 'Returns',
+    crumbs: [['Orders', '#/orders']],
+    subtitle: 'Review return requests, approve them, and refund returned items.',
+    html: tableCard(t, { tabsHtml: cardTabs('returnTab', [['requested', 'Requested'], ['open', 'Open'], ['closed', 'Closed'], ['declined', 'Declined'], ['all', 'All']], tab) }),
+    wire(root) { wireFilters(root); t.wire(root); },
+  };
 };
 
 // ---- products
@@ -427,19 +500,23 @@ PAGES.products = () => {
   const rows = Q('listProducts', { storeId: ui.store, status: tab === 'all' ? undefined : tab, q: ui.f.prodQ || undefined, vendor: ui.f.prodVendor || undefined, sku: ui.f.prodSku || undefined }).items;
   const vendors = [...new Set(S().products.filter((p) => p.storeId === ui.store).map((p) => p.vendor))].sort();
   const t = table('products', rows, [
-    { label: 'Product', render: (p) => `<a href="#/products/${p.id}"><strong>${esc(p.title)}</strong></a>` },
+    { label: 'Product', render: (p) => `<div class="with-thumb">${thumb(p.id, p.title)}<div><a class="cell-title" href="#/products/${p.id}">${esc(p.title)}</a><div class="muted tiny">${esc(p.productType)}</div></div></div>` },
     { label: 'Status', render: (p) => pill(p.status) },
-    { label: 'Inventory', num: true, render: (p) => `${p.totalInventory} in stock<div class="muted tiny">${p.variantsCount} variant${p.variantsCount > 1 ? 's' : ''}</div>` },
-    { label: 'Price', num: true, render: (p) => (p.minPriceCents === p.maxPriceCents ? money(p.minPriceCents) : `${money(p.minPriceCents)}–${money(p.maxPriceCents)}`) },
-    { label: 'Type', render: (p) => esc(p.productType) },
+    { label: 'Stock', render: (p) => stockPill(p.totalInventory) },
+    { label: 'Inventory', num: true, render: (p) => `${p.totalInventory}<div class="muted tiny">${plural(p.variantsCount, 'variant')}</div>` },
     { label: 'Vendor', render: (p) => esc(p.vendor) },
     { label: 'Tags', render: (p) => tagsHtml(p.tags) },
-  ], { href: (p) => `#/products/${p.id}` });
+    { label: 'Price', num: true, render: (p) => (p.minPriceCents === p.maxPriceCents ? money(p.minPriceCents) : `${money(p.minPriceCents)}–${money(p.maxPriceCents)}`) },
+  ], { href: (p) => `#/products/${p.id}`, noun: 'product', empty: 'No products match these filters.' });
   return {
     title: 'Products',
-    html: `<div class="toolbar">${tabs('prodTab', [['all', 'All'], ['active', 'Active'], ['draft', 'Draft'], ['archived', 'Archived']], tab)} ${filterInput('prodQ', 'Search title')} ${filterInput('prodSku', 'SKU')}
-      <select data-filter="prodVendor"><option value="">All vendors</option>${vendors.map((v) => `<option${ui.f.prodVendor === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>
-      <span style="flex:1"></span><button class="btn primary" id="new-product">Add product</button></div><div class="card">${t.html}</div>`,
+    subtitle: `${plural(rows.length, 'product')} in ${esc(store().name)}`,
+    actions: `<a class="btn" href="#/collections">Collections</a>${btnIcon('new-product', 'Add product')}`,
+    html: tableCard(t, {
+      tabsHtml: cardTabs('prodTab', [['all', 'All'], ['active', 'Active'], ['draft', 'Draft'], ['archived', 'Archived']], tab),
+      toolbar: `${searchInput('prodQ', 'Search title')} ${filterInput('prodSku', 'SKU')}
+        <select data-filter="prodVendor"><option value="">All vendors</option>${vendors.map((v) => `<option${ui.f.prodVendor === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>`,
+    }),
     wire(root) { wireFilters(root); t.wire(root); $('#new-product', root).onclick = newProductForm; },
   };
 };
@@ -504,7 +581,7 @@ PAGES.product = (id) => {
   const p = Q('getProduct', { productId: id });
   if (p.storeId !== ui.store) { ui.store = p.storeId; localStorage.setItem('cartwright:ui:store', p.storeId); }
   const locs = get('stores', p.storeId).locationIds;
-  const html = `<div class="grid2"><div>
+  const html = `<div class="layout"><div>
     <div class="card"><h2>Details</h2><form class="form" id="pform" onsubmit="return false">
       ${fieldHtml({ name: 'title', label: 'Title', value: p.title, full: true })}
       ${fieldHtml({ name: 'description', label: 'Description', type: 'textarea', value: p.description, full: true })}
@@ -512,20 +589,25 @@ PAGES.product = (id) => {
       ${fieldHtml({ name: 'productType', label: 'Product type', value: p.productType })}
       ${fieldHtml({ name: 'status', label: 'Status', type: 'select', options: C.PRODUCT_STATUSES, value: p.status })}
       ${fieldHtml({ name: 'tags', label: 'Tags (comma separated)', value: p.tags.join(', ') })}
-      <div class="full"><button class="btn primary" id="psave">Save product</button></div></form></div>
-    <div class="card"><h2>Variants ${p.options.length ? '<button class="btn small" id="addvar">Add variant</button>' : ''}</h2>
-      <p class="muted tiny">${p.options.map((o) => `${esc(o.name)}: ${o.values.map(esc).join(', ')}`).join(' · ') || 'No options (single default variant)'}</p>
-      <div class="table-wrap"><table><thead><tr><th>Variant</th><th>SKU</th><th class="num">Price</th><th class="num">Compare-at</th>${locs.map((l) => `<th class="num">${esc(locLabel(l))}</th>`).join('')}<th></th></tr></thead><tbody>
-      ${p.variants.map((v) => `<tr><td>${esc(v.title)}${v.inventoryPolicy === 'continue' ? ' <span class="muted tiny">(sells when out)</span>' : ''}</td><td>${esc(v.sku)}</td><td class="num">${money(v.priceCents)}</td><td class="num">${v.compareAtCents != null ? money(v.compareAtCents) : '—'}</td>
-        ${locs.map((l) => `<td class="num"><a href="#" data-stock="${v.id}|${l}">${v.inventory[l] ?? 0}</a></td>`).join('')}<td><button class="btn small" data-var="${v.id}">Edit</button></td></tr>`).join('')}
-      </tbody></table></div><p class="muted tiny">Click a stock number to adjust inventory at that location.</p></div>
+      <div class="full" style="display:flex;justify-content:flex-end"><button class="btn primary" id="psave">Save product</button></div></form></div>
+    <div class="card flush"><h2>Variants ${p.options.length ? `<button class="btn small" id="addvar">${icon('plus')}Add variant</button>` : ''}</h2>
+      <div class="card-section muted tiny">${p.options.map((o) => `<strong>${esc(o.name)}</strong>: ${o.values.map(esc).join(', ')}`).join(' · ') || 'No options (single default variant)'}</div>
+      <div class="table-wrap"><table><thead><tr><th>Variant</th><th>SKU</th><th>Stock</th><th class="num">Price</th><th class="num">Compare-at</th>${locs.map((l) => `<th class="num">${esc(locLabel(l))}</th>`).join('')}<th></th></tr></thead><tbody>
+      ${p.variants.map((v) => { const tot = locs.reduce((a, l) => a + (v.inventory[l] ?? 0), 0); return `<tr><td><span class="cell-title">${esc(v.title)}</span>${v.inventoryPolicy === 'continue' ? '<div class="muted tiny">sells when out of stock</div>' : ''}</td><td class="muted nowrap">${esc(v.sku)}</td><td>${stockPill(tot)}</td><td class="num">${money(v.priceCents)}</td><td class="num">${v.compareAtCents != null ? `<span class="strike" style="margin:0">${money(v.compareAtCents)}</span>` : '—'}</td>
+        ${locs.map((l) => `<td class="num"><a href="#" data-stock="${v.id}|${l}" title="Adjust stock at ${esc(locLabel(l))}">${v.inventory[l] ?? 0}</a></td>`).join('')}<td class="num"><button class="btn small" data-var="${v.id}">Edit</button></td></tr>`; }).join('')}
+      </tbody></table></div><div class="card-foot muted tiny">Click a stock number to adjust inventory at that location.</div></div>
   </div><div>
-    <div class="card"><h2>Summary</h2><dl class="kv"><dt>Status</dt><dd>${pill(p.status)}</dd><dt>Total stock</dt><dd>${p.totalInventory}</dd><dt>Handle</dt><dd>${esc(p.handle)}</dd><dt>ID</dt><dd class="muted">${p.id}</dd><dt>Created</dt><dd>${when(p.createdAt)}</dd></dl></div>
-    <div class="card"><h2>Collections</h2>${p.collections.map((c) => `<div><a href="#/collections/${c.id}">${esc(c.title)}</a> <span class="muted tiny">${c.type}</span></div>`).join('') || '<p class="muted">Not in any collection.</p>'}</div>
+    <div class="card"><h2>Status</h2><dl class="kv"><dt>Status</dt><dd>${pill(p.status)}</dd><dt>Availability</dt><dd>${stockPill(p.totalInventory)}</dd><dt>Created</dt><dd>${when(p.createdAt)}</dd></dl></div>
+    <div class="card"><h2>Inventory</h2><dl class="sum">${locs.map((l) => `<dt>${esc(locLabel(l))}</dt><dd>${p.variants.reduce((a, v) => a + (v.inventory[l] ?? 0), 0)}</dd>`).join('')}<dt class="total">Total available</dt><dd class="total">${p.totalInventory}</dd></dl></div>
+    <div class="card"><h2>Organization</h2><dl class="kv"><dt>Vendor</dt><dd>${esc(p.vendor)}</dd><dt>Type</dt><dd>${esc(p.productType) || '—'}</dd><dt>Handle</dt><dd>${esc(p.handle)}</dd><dt>Tags</dt><dd>${tagsHtml(p.tags)}</dd><dt>ID</dt><dd class="muted">${p.id}</dd></dl></div>
+    <div class="card"><h2>Collections</h2>${p.collections.map((c) => `<div style="display:flex;justify-content:space-between;margin-bottom:var(--s-2)"><a href="#/collections/${c.id}">${esc(c.title)}</a> <span class="muted tiny">${c.type === 'smart' ? 'Automated' : 'Manual'}</span></div>`).join('') || '<p class="muted">Not in any collection.</p>'}</div>
   </div></div>`;
   return {
     title: p.title,
-    titleHtml: `<a href="#/products">Products</a> › ${esc(p.title)} ${pill(p.status)}`,
+    titleHtml: `${esc(p.title)} ${pill(p.status)}`,
+    crumbs: [['Products', '#/products']],
+    subtitle: `${esc(p.vendor)} · ${plural(p.variants.length, 'variant')} · ${p.totalInventory} in stock`,
+    actions: p.status === 'active' ? `<a class="btn" href="#/storefront">${icon('ext')}View in storefront</a>` : '',
     html,
     wire(root) {
       $('#psave', root).onclick = () => { const f = $('#pform', root); const val = (n) => $(`[name=${n}]`, f).value; act('updateProduct', { productId: p.id, title: val('title'), description: val('description'), vendor: val('vendor'), productType: val('productType'), status: val('status'), tags: val('tags') }, 'Product saved'); };
@@ -543,19 +625,29 @@ PAGES.product = (id) => {
 
 PAGES.inventory = () => {
   const loc = ui.f.invLoc && store().locationIds.includes(ui.f.invLoc) ? ui.f.invLoc : store().locationIds[0];
-  const rows = Q('inventoryLevels', { storeId: ui.store, locationId: loc, sku: ui.f.invSku || undefined, belowQty: ui.f.invBelow || undefined }).items;
+  const all = Q('inventoryLevels', { storeId: ui.store, locationId: loc, sku: ui.f.invSku || undefined, belowQty: ui.f.invBelow || undefined }).items;
+  const stockTab = ui.f.invStock || 'all';
+  const rows = all.filter((r) => (stockTab === 'out' ? r.available <= 0 : stockTab === 'low' ? r.available > 0 && r.available < STOCK_LOW : stockTab === 'in' ? r.available >= STOCK_LOW : true));
   const t = table('inventory', rows, [
-    { label: 'Product', render: (r) => `<a href="#/products/${r.productId}">${esc(r.productTitle)}</a> ${r.productStatus !== 'active' ? pill(r.productStatus) : ''}<div class="muted tiny">${esc(r.variantTitle)}</div>` },
-    { label: 'SKU', render: (r) => esc(r.sku) },
+    { label: 'Product', render: (r) => `<div class="with-thumb">${thumb(r.productId, r.productTitle)}<div><a class="cell-title" href="#/products/${r.productId}">${esc(r.productTitle)}</a> ${r.productStatus !== 'active' ? pill(r.productStatus) : ''}<div class="muted tiny">${esc(r.variantTitle)}</div></div></div>` },
+    { label: 'SKU', cls: 'nowrap', render: (r) => `<span class="muted">${esc(r.sku)}</span>` },
+    { label: 'Stock', render: (r) => stockPill(r.available) },
     { label: 'Available', num: true, render: (r) => `<strong>${r.available}</strong>` },
-    { label: 'Set to', num: true, render: (r) => `<input class="qty" type="number" min="0" value="${r.available}" data-set="${r.variantId}"> <button class="btn small" data-save="${r.variantId}">Save</button>` },
-  ]);
+    { label: 'Set to', num: true, render: (r) => `<span class="inline-save"><input class="qty" type="number" min="0" value="${r.available}" data-set="${r.variantId}"><button class="btn small" data-save="${r.variantId}">Save</button></span>` },
+  ], { noun: 'variant', empty: 'No inventory matches these filters.' });
   const adj = Q('listInventoryAdjustments', { storeId: ui.store, limit: 12 }).items;
+  const count = (f) => all.filter(f).length;
   return {
     title: 'Inventory',
-    html: `<div class="toolbar"><label>Location <select data-filter="invLoc">${store().locationIds.map((l) => `<option value="${l}"${l === loc ? ' selected' : ''}>${esc(locLabel(l))}</option>`).join('')}</select></label>
-      ${filterInput('invSku', 'SKU')} <label>Below <input data-filter="invBelow" size="4" value="${esc(ui.f.invBelow || '')}" placeholder="qty"></label></div>
-      <div class="grid2"><div class="card">${t.html}</div><div class="card"><h2>Recent adjustments</h2>${adj.map((a) => `<div class="tiny">${a.delta > 0 ? '+' : ''}${a.delta} ${esc(a.sku)} @ ${esc(locLabel(a.locationId))} <span class="muted">${esc(a.reason)} · ${when(a.createdAt)}</span></div>`).join('') || '<p class="muted">No adjustments yet this session.</p>'}</div></div>`,
+    crumbs: [['Products', '#/products']],
+    subtitle: `Stock levels at ${esc(locLabel(loc))}`,
+    html: `<div class="layout"><div>${tableCard(t, {
+      tabsHtml: cardTabs('invStock', [['all', `All (${all.length})`], ['in', 'In stock'], ['low', `Low stock (${count((r) => r.available > 0 && r.available < STOCK_LOW)})`], ['out', `Out of stock (${count((r) => r.available <= 0)})`]], stockTab),
+      toolbar: `<label>Location <select data-filter="invLoc">${store().locationIds.map((l) => `<option value="${l}"${l === loc ? ' selected' : ''}>${esc(locLabel(l))}</option>`).join('')}</select></label>
+        ${searchInput('invSku', 'SKU')} <label>Below <input data-filter="invBelow" size="4" style="width:72px" value="${esc(ui.f.invBelow || '')}" placeholder="qty"></label>`,
+    })}</div><div>
+      <div class="card"><h2>Recent adjustments</h2>${adj.length ? `<ul class="timeline">${adj.map((a) => `<li><strong style="color:${a.delta > 0 ? 'var(--ok)' : 'var(--bad)'}">${a.delta > 0 ? '+' : ''}${a.delta}</strong> ${esc(a.sku)} <span class="muted">@ ${esc(locLabel(a.locationId))}</span><div class="muted tiny">${esc(a.reason)} · ${when(a.createdAt)}</div></li>`).join('')}</ul>` : '<p class="muted">No adjustments yet this session.</p>'}</div>
+    </div></div>`,
     wire(root) {
       wireFilters(root); t.wire(root);
       $$('[data-save]', root).forEach((b) => { b.onclick = () => act('setInventory', { variantId: b.dataset.save, locationId: loc, quantity: Number($(`[data-set="${b.dataset.save}"]`, root).value), reason: 'correction' }, 'Inventory updated'); });
@@ -594,31 +686,42 @@ function collectionForm(col) {
 PAGES.collections = () => {
   const rows = Q('listCollections', { storeId: ui.store });
   const t = table('collections', rows, [
-    { label: 'Title', render: (c) => `<a href="#/collections/${c.id}"><strong>${esc(c.title)}</strong></a>` },
-    { label: 'Type', render: (c) => (c.type === 'smart' ? 'Automated' : 'Manual') },
+    { label: 'Title', render: (c) => `<div class="with-thumb">${thumb(c.id, c.title)}<a class="cell-title" href="#/collections/${c.id}">${esc(c.title)}</a></div>` },
+    { label: 'Type', render: (c) => `<span class="pill ${c.type === 'smart' ? 'open' : ''}">${c.type === 'smart' ? 'Automated' : 'Manual'}</span>` },
     { label: 'Conditions', render: (c) => (c.type === 'smart' ? c.rules.map((r) => `${esc(r.column)} ${esc(r.relation)} <strong>${esc(r.condition)}</strong>`).join(c.disjunctive ? ' <em>or</em> ' : ' <em>and</em> ') : '<span class="muted">—</span>') },
     { label: 'Products', num: true, render: (c) => c.productsCount },
-  ], { href: (c) => `#/collections/${c.id}` });
-  return { title: 'Collections', html: `<div class="toolbar"><span style="flex:1"></span><button class="btn primary" id="new-col">Create collection</button></div><div class="card">${t.html}</div>`, wire(root) { t.wire(root); $('#new-col', root).onclick = () => collectionForm(); } };
+  ], { href: (c) => `#/collections/${c.id}`, noun: 'collection', empty: 'No collections yet.' });
+  return {
+    title: 'Collections',
+    crumbs: [['Products', '#/products']],
+    subtitle: 'Group products manually or automatically with conditions.',
+    actions: btnIcon('new-col', 'Create collection'),
+    html: tableCard(t),
+    wire(root) { t.wire(root); $('#new-col', root).onclick = () => collectionForm(); },
+  };
 };
 
 PAGES.collection = (id) => {
   const c = Q('getCollection', { collectionId: id });
   const manual = c.type === 'manual';
   const t = table('colprods', c.products, [
-    { label: 'Product', render: (p) => `<a href="#/products/${p.id}">${esc(p.title)}</a>` },
+    { label: 'Product', render: (p) => `<div class="with-thumb">${thumb(p.id, p.title)}<a class="cell-title" href="#/products/${p.id}">${esc(p.title)}</a></div>` },
     { label: 'Status', render: (p) => pill(p.status) },
-    { label: 'Price', num: true, render: (p) => money(p.minPriceCents) },
+    { label: 'Stock', render: (p) => stockPill(p.totalInventory) },
     { label: 'Inventory', num: true, render: (p) => p.totalInventory },
-    ...(manual ? [{ label: '', render: (p) => `<button class="btn small danger" data-rm="${p.id}">Remove</button>` }] : []),
-  ]);
+    { label: 'Price', num: true, render: (p) => money(p.minPriceCents) },
+    ...(manual ? [{ label: '', num: true, render: (p) => `<button class="btn small danger" data-rm="${p.id}">Remove</button>` }] : []),
+  ], { noun: 'product', empty: 'No products in this collection.' });
   const candidates = S().products.filter((p) => p.storeId === c.storeId && !c.products.some((x) => x.id === p.id));
   return {
     title: c.title,
-    titleHtml: `<a href="#/collections">Collections</a> › ${esc(c.title)}`,
-    html: `<div class="card"><div class="actions"><button class="btn" id="edit-col">Edit</button>
-      ${manual ? `<select id="add-pid">${candidates.map((p) => `<option value="${p.id}">${esc(p.title)} (${p.id})</option>`).join('')}</select><button class="btn primary" id="add-p">Add product</button>` : `<span class="muted">Automated: ${c.rules.map((r) => `${esc(r.column)} ${esc(r.relation)} ${esc(r.condition)}`).join(c.disjunctive ? ' OR ' : ' AND ')}</span>`}</div></div>
-      <div class="card"><h2>${c.productsCount} products</h2>${t.html}</div>`,
+    crumbs: [['Collections', '#/collections']],
+    subtitle: `${manual ? 'Manual' : 'Automated'} collection · ${plural(c.productsCount, 'product')}`,
+    actions: '<button class="btn" id="edit-col">Edit collection</button>',
+    html: `<div class="layout"><div>${tableCard(t, { title: 'Products' })}</div><div>
+      <div class="card"><h2>Collection type</h2>${manual ? '<p>Manual — products are added and removed by hand.</p>' : `<p>Automated — products must match <strong>${c.disjunctive ? 'any' : 'all'}</strong> conditions:</p><ul class="timeline">${c.rules.map((r) => `<li>${esc(r.column)} ${esc(r.relation)} <strong>${esc(r.condition)}</strong></li>`).join('')}</ul>`}<dl class="kv"><dt>ID</dt><dd class="muted">${c.id}</dd></dl></div>
+      ${manual ? `<div class="card"><h2>Add product</h2><div class="stack"><select id="add-pid" style="width:100%;height:32px;border:1px solid var(--line-strong);border-radius:var(--radius-sm);font:inherit;padding:0 var(--s-2)">${candidates.map((p) => `<option value="${p.id}">${esc(p.title)} (${p.id})</option>`).join('')}</select><button class="btn primary" id="add-p" style="width:100%">${icon('plus')}Add product</button></div></div>` : ''}
+    </div></div>`,
     wire(root) {
       t.wire(root);
       $('#edit-col', root).onclick = () => collectionForm(get('collections', c.id));
@@ -642,18 +745,19 @@ const addressFields = (a = {}) => [
 PAGES.customers = () => {
   const rows = Q('listCustomers', { storeId: ui.store, q: ui.f.custQ || undefined, tag: ui.f.custTag || undefined, sort: ui.f.custSort || 'newest' }).items;
   const t = table('customers', rows, [
-    { label: 'Customer', render: (c) => `<a href="#/customers/${c.id}"><strong>${esc(`${c.firstName} ${c.lastName}`)}</strong></a><div class="muted tiny">${esc(c.email)}</div>` },
+    { label: 'Customer', render: (c) => `<div class="with-thumb">${avatar(c.id, `${c.firstName} ${c.lastName}`)}<div><a class="cell-title" href="#/customers/${c.id}">${esc(`${c.firstName} ${c.lastName}`)}</a><div class="muted tiny">${esc(c.email)}</div></div></div>` },
     { label: 'Location', render: (c) => { const a = c.addresses.find((x) => x.isDefault); return a ? `${esc(a.city)}, ${esc(a.province)}` : '—'; } },
-    { label: 'Orders', num: true, render: (c) => c.ordersCount },
-    { label: 'Amount spent', num: true, render: (c) => money(c.totalSpentCents) },
-    { label: 'Marketing', render: (c) => (c.acceptsMarketing ? 'Subscribed' : '<span class="muted">—</span>') },
+    { label: 'Marketing', render: (c) => (c.acceptsMarketing ? '<span class="pill active">Subscribed</span>' : '<span class="pill">Not subscribed</span>') },
     { label: 'Tags', render: (c) => tagsHtml(c.tags) },
-  ], { href: (c) => `#/customers/${c.id}` });
+    { label: 'Orders', num: true, render: (c) => c.ordersCount },
+    { label: 'Amount spent', num: true, render: (c) => `<strong>${money(c.totalSpentCents)}</strong>` },
+  ], { href: (c) => `#/customers/${c.id}`, noun: 'customer', empty: 'No customers match these filters.' });
   return {
     title: 'Customers',
-    html: `<div class="toolbar">${filterInput('custQ', 'Name or email')} ${filterInput('custTag', 'Tag')}
-      <select data-filter="custSort">${[['newest', 'Newest'], ['spent', 'Most spent'], ['orders', 'Most orders'], ['name', 'Name']].map(([v, l]) => `<option value="${v}"${(ui.f.custSort || 'newest') === v ? ' selected' : ''}>Sort: ${l}</option>`).join('')}</select>
-      <span style="flex:1"></span><button class="btn primary" id="new-cust">Add customer</button></div><div class="card">${t.html}</div>`,
+    subtitle: `${plural(rows.length, 'customer')} in ${esc(store().name)}`,
+    actions: btnIcon('new-cust', 'Add customer'),
+    html: tableCard(t, { toolbar: `${searchInput('custQ', 'Name or email')} ${filterInput('custTag', 'Tag')}
+      <select data-filter="custSort">${[['newest', 'Newest'], ['spent', 'Most spent'], ['orders', 'Most orders'], ['name', 'Name']].map(([v, l]) => `<option value="${v}"${(ui.f.custSort || 'newest') === v ? ' selected' : ''}>Sort: ${l}</option>`).join('')}</select>` }),
     wire(root) {
       wireFilters(root); t.wire(root);
       $('#new-cust', root).onclick = () => openForm({
@@ -674,22 +778,28 @@ PAGES.customers = () => {
 PAGES.customer = (id) => {
   const c = Q('getCustomer', { customerId: id });
   const t = table('custorders', c.orders, [
-    { label: 'Order', render: (o) => `<a href="#/orders/${o.id}">${esc(o.name)}</a>` },
-    { label: 'Date', render: (o) => when(o.createdAt) },
-    { label: 'Total', num: true, render: (o) => money(o.totalCents) },
+    { label: 'Order', render: (o) => `<a class="cell-title" href="#/orders/${o.id}">${esc(o.name)}</a>` },
+    { label: 'Date', cls: 'nowrap', render: (o) => when(o.createdAt) },
     { label: 'Payment', render: (o) => pill(o.financialStatus) },
     { label: 'Fulfillment', render: (o) => pill(o.fulfillmentStatus) },
     { label: 'Status', render: (o) => pill(o.status) },
-  ], { href: (o) => `#/orders/${o.id}`, pageSize: 20 });
+    { label: 'Total', num: true, render: (o) => money(o.totalCents) },
+  ], { href: (o) => `#/orders/${o.id}`, pageSize: 10, noun: 'order', empty: 'This customer has no orders yet.' });
+  const full = `${c.firstName} ${c.lastName}`.trim() || c.email;
   return {
     title: `${c.firstName} ${c.lastName}`,
-    titleHtml: `<a href="#/customers">Customers</a> › ${esc(`${c.firstName} ${c.lastName}`)}`,
-    html: `<div class="tiles"><div class="tile"><div class="label">Amount spent</div><div class="value">${money(c.totalSpentCents)}</div></div><div class="tile"><div class="label">Orders</div><div class="value">${c.ordersCount}</div></div><div class="tile"><div class="label">Customer since</div><div class="value" style="font-size:18px">${esc(C.dateOf(c.createdAt))}</div></div></div>
-    <div class="grid2"><div><div class="card"><h2>Orders <button class="btn small primary" id="cust-order">Create order</button></h2>${t.html}</div></div><div>
-      <div class="card"><h2>Contact <button class="btn small" id="edit-cust">Edit</button></h2><dl class="kv"><dt>Email</dt><dd>${esc(c.email)}</dd><dt>Phone</dt><dd>${esc(c.phone) || '—'}</dd><dt>Marketing</dt><dd>${c.acceptsMarketing ? 'Subscribed' : 'Not subscribed'}</dd><dt>Note</dt><dd>${esc(c.note) || '—'}</dd><dt>ID</dt><dd class="muted">${c.id}</dd></dl></div>
+    titleHtml: `${esc(full)}${c.acceptsMarketing ? ' <span class="pill active">Subscribed</span>' : ''}`,
+    crumbs: [['Customers', '#/customers']],
+    subtitle: `${esc(c.email)} · customer since ${esc(C.dateOf(c.createdAt))}`,
+    actions: btnIcon('cust-order', 'Create order'),
+    html: `<div class="layout"><div>
+      <div class="tiles"><div class="tile"><div class="label"><span class="ic">${icon('money')}</span>Amount spent</div><div class="value">${money(c.totalSpentCents)}</div></div><div class="tile"><div class="label"><span class="ic">${icon('cart')}</span>Orders</div><div class="value">${c.ordersCount}</div></div><div class="tile"><div class="label"><span class="ic amber">${icon('avg')}</span>Average order</div><div class="value">${money(c.ordersCount ? Math.round(c.totalSpentCents / c.ordersCount) : 0)}</div></div></div>
+      ${tableCard(t, { title: 'Orders' })}
+    </div><div>
+      <div class="card"><h2>Contact <button class="btn small" id="edit-cust">Edit</button></h2><div class="with-thumb" style="margin-bottom:var(--s-3)">${avatar(c.id, full)}<div><strong>${esc(full)}</strong><div class="muted tiny">${esc(c.email)}</div></div></div><dl class="kv"><dt>Phone</dt><dd>${esc(c.phone) || '—'}</dd><dt>Marketing</dt><dd>${c.acceptsMarketing ? 'Subscribed' : 'Not subscribed'}</dd><dt>Note</dt><dd>${esc(c.note) || '—'}</dd><dt>ID</dt><dd class="muted">${c.id}</dd></dl></div>
       <div class="card"><h2>Tags</h2><div>${c.tags.map((t2) => `<span class="tag">${esc(t2)} <a href="#" data-untag="${esc(t2)}" aria-label="remove">×</a></span>`).join('') || '<span class="muted">No tags</span>'}</div>
-        <div class="toolbar" style="margin-top:8px"><input id="tag-in" placeholder="Add tag"><button class="btn small" id="tag-add">Add</button></div></div>
-      <div class="card"><h2>Addresses <button class="btn small" id="addr-add">Add</button></h2>${c.addresses.map((a) => `<div style="margin-bottom:10px">${esc(a.address1)}, ${esc(a.city)}, ${esc(a.province)} ${esc(a.zip)} ${esc(a.country)} ${a.isDefault ? '<span class="pill active">default</span>' : `<button class="btn small" data-def="${a.id}">Make default</button> <button class="btn small danger" data-deladdr="${a.id}">Delete</button>`}</div>`).join('') || '<p class="muted">No addresses.</p>'}</div>
+        <div class="toolbar" style="margin:var(--s-3) 0 0"><input id="tag-in" placeholder="Add tag" style="flex:1;min-width:0"><button class="btn small" id="tag-add" style="height:32px">Add</button></div></div>
+      <div class="card"><h2>Addresses <button class="btn small" id="addr-add">${icon('plus')}Add</button></h2>${c.addresses.map((a) => `<div class="addr" style="padding:var(--s-2) 0;border-top:1px solid var(--line)">${esc(a.address1)}<br>${esc(a.city)}, ${esc(a.province)} ${esc(a.zip)}<br>${esc(a.country)}<div style="margin-top:var(--s-2)" class="actions">${a.isDefault ? '<span class="pill active">Default</span>' : `<button class="btn small" data-def="${a.id}">Make default</button><button class="btn small danger" data-deladdr="${a.id}">Delete</button>`}</div></div>`).join('') || '<p class="muted">No addresses.</p>'}</div>
     </div></div>`,
     wire(root) {
       t.wire(root);
@@ -711,17 +821,19 @@ PAGES.discounts = () => {
   const tab = ui.f.discTab || 'all';
   const rows = Q('listDiscounts', { storeId: ui.store, status: tab === 'all' ? undefined : tab });
   const t = table('discounts', rows, [
-    { label: 'Code', render: (d) => `<strong>${esc(d.code)}</strong><div class="muted tiny">${esc(d.title)}</div>` },
+    { label: 'Code', render: (d) => `<div class="with-thumb"><span class="thumb" style="background:var(--accent-soft);color:var(--accent)">${icon('tag')}</span><div><span class="cell-title">${esc(d.code)}</span><div class="muted tiny">${esc(d.title)}</div></div></div>` },
     { label: 'Status', render: (d) => pill(d.status) },
     { label: 'Value', render: (d) => `${discountValue(d)}${d.scope === 'collections' ? ` · ${d.collectionIds.map((x) => esc(get('collections', x)?.title)).join(', ')}` : d.scope === 'products' ? ` · ${d.productIds.length} products` : ''}` },
     { label: 'Requirements', render: (d) => `${discountMin(d)}${d.oncePerCustomer ? ' · once per customer' : ''}` },
-    { label: 'Used', num: true, render: (d) => `${d.usageCount}${d.usageLimit != null ? ` / ${d.usageLimit}` : ''}` },
     { label: 'Active dates', render: (d) => `${esc(d.startsAt)} → ${esc(d.endsAt || 'no end')}` },
-    { label: '', render: (d) => `<button class="btn small" data-dedit="${d.id}">Edit</button> ${d.enabled ? `<button class="btn small danger" data-doff="${d.id}">Deactivate</button>` : `<button class="btn small" data-don="${d.id}">Activate</button>`}` },
-  ]);
+    { label: 'Used', num: true, render: (d) => `${d.usageCount}${d.usageLimit != null ? ` / ${d.usageLimit}` : ''}` },
+    { label: '', num: true, render: (d) => `<span class="inline-save"><button class="btn small" data-dedit="${d.id}">Edit</button>${d.enabled ? `<button class="btn small danger" data-doff="${d.id}">Deactivate</button>` : `<button class="btn small" data-don="${d.id}">Activate</button>`}</span>` },
+  ], { noun: 'discount', empty: 'No discounts in this view.' });
   return {
     title: 'Discounts',
-    html: `<div class="toolbar">${tabs('discTab', [['all', 'All'], ['active', 'Active'], ['scheduled', 'Scheduled'], ['expired', 'Expired'], ['disabled', 'Disabled']], tab)}<span style="flex:1"></span><button class="btn primary" id="new-disc">Create discount</button></div><div class="card">${t.html}</div>`,
+    subtitle: 'Codes customers enter at checkout for money off or free shipping.',
+    actions: btnIcon('new-disc', 'Create discount'),
+    html: tableCard(t, { tabsHtml: cardTabs('discTab', [['all', 'All'], ['active', 'Active'], ['scheduled', 'Scheduled'], ['expired', 'Expired'], ['disabled', 'Disabled']], tab) }),
     wire(root) {
       wireFilters(root); t.wire(root);
       $('#new-disc', root).onclick = () => discountForm();
@@ -775,12 +887,13 @@ PAGES.analytics = () => {
   const tile = (l, v) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div></div>`;
   return {
     title: 'Analytics',
-    html: `<div class="toolbar"><label>From <input type="date" data-filter="anFrom" value="${from}"></label><label>To <input type="date" data-filter="anTo" value="${to}"></label>
-      <select data-filter="anInt">${['day', 'week', 'month'].map((i) => `<option value="${i}"${i === interval ? ' selected' : ''}>By ${i}</option>`).join('')}</select><span class="muted tiny">Press Enter in a date field to apply.</span></div>
+    subtitle: `${esc(from)} → ${esc(to)} · ${esc(store().name)}`,
+    html: `<div class="card" style="padding:var(--s-3) var(--s-4)"><div class="toolbar" style="margin:0"><label>From <input type="date" data-filter="anFrom" value="${from}"></label><label>To <input type="date" data-filter="anTo" value="${to}"></label>
+      <select data-filter="anInt">${['day', 'week', 'month'].map((i) => `<option value="${i}"${i === interval ? ' selected' : ''}>By ${i}</option>`).join('')}</select><span class="muted tiny">Press Enter in a date field to apply.</span></div></div>
     <div class="tiles">${tile('Gross sales', money(sum.grossSalesCents))}${tile('Discounts', money(-sum.discountsCents))}${tile('Returns', money(-sum.returnsCents))}${tile('Net sales', money(sum.netSalesCents))}${tile('Total sales', money(sum.totalSalesCents))}${tile('Orders', sum.orders)}${tile('Average order value', money(sum.averageOrderValueCents))}${tile('Returning customers', `${(sum.returningCustomerRate * 100).toFixed(1)}%`)}</div>
-    <div class="card"><h2>Net sales by ${interval} <button class="btn small" id="toggle-table">Show table</button></h2>${columnChart(sales.rows, { value: (r) => r.netSalesCents, label: (r) => r.period, fmt: shortMoney, title: `Net sales by ${interval}` })}
+    <div class="card"><h2>Net sales by ${interval} <button class="btn small" id="toggle-table">Show table</button></h2><div class="chart-head"><span class="big">${money(sum.netSalesCents)}</span><span class="muted">net sales · ${plural(sum.orders, 'order')}</span></div>${columnChart(sales.rows, { value: (r) => r.netSalesCents, label: (r) => r.period, fmt: shortMoney, title: `Net sales by ${interval}` })}
       <div id="sales-table" hidden>${table('salesrows', sales.rows, [{ label: 'Period', render: (r) => r.period }, { label: 'Orders', num: true, render: (r) => r.orders }, { label: 'Gross', num: true, render: (r) => money(r.grossSalesCents) }, { label: 'Discounts', num: true, render: (r) => money(r.discountsCents) }, { label: 'Returns', num: true, render: (r) => money(r.returnsCents) }, { label: 'Net', num: true, render: (r) => money(r.netSalesCents) }], { pageSize: 200 }).html}</div></div>
-    <div class="card"><h2>Top products ${tabs('anBy', [['units', 'By units'], ['revenue', 'By net sales']], by)}</h2>${table('top', top.items, [{ label: '#', render: (r) => top.items.indexOf(r) + 1 }, { label: 'Product', render: (r) => `<a href="#/products/${r.productId}">${esc(r.title)}</a>` }, { label: 'Net units', num: true, render: (r) => r.unitsSold }, { label: 'Net sales', num: true, render: (r) => money(r.netSalesCents) }, { label: 'Orders', num: true, render: (r) => r.orders }]).html}</div>`,
+    <div class="card flush"><h2>Top products ${tabs('anBy', [['units', 'By units'], ['revenue', 'By net sales']], by)}</h2>${table('top', top.items, [{ label: '#', render: (r) => `<span class="muted">${top.items.indexOf(r) + 1}</span>` }, { label: 'Product', render: (r) => `<div class="with-thumb">${thumb(r.productId, r.title)}<a class="cell-title" href="#/products/${r.productId}">${esc(r.title)}</a></div>` }, { label: 'Net units', num: true, render: (r) => r.unitsSold }, { label: 'Orders', num: true, render: (r) => r.orders }, { label: 'Net sales', num: true, render: (r) => `<strong>${money(r.netSalesCents)}</strong>` }], { noun: 'product', empty: 'No sales in this period.' }).html}</div>`,
     wire(root) {
       wireFilters(root); wireChart(root);
       $('#toggle-table', root).onclick = (e) => { const t = $('#sales-table', root); t.hidden = !t.hidden; e.target.textContent = t.hidden ? 'Show table' : 'Hide table'; };
@@ -789,7 +902,6 @@ PAGES.analytics = () => {
 };
 
 // ---- storefront
-const swatchColor = (id) => { const h = (200 + (C.hashSeed(id) % 170)) % 360; return `hsl(${h} 45% 42%)`; }; // blues→purples→reds→oranges
 function currentCart() {
   const id = ui.carts[ui.store];
   const c = id && get('carts', id);
@@ -804,20 +916,22 @@ PAGES.storefront = () => {
   const cols = S().collections.filter((c) => c.storeId === ui.store);
   return {
     title: `Storefront · ${store().name}`,
-    html: `<div class="storefront-banner"><h2>${esc(store().name)}</h2><div class="tiny">${esc(store().domain)} — a simulated shopper view. Checkout creates a real order in the admin.</div></div>
-    <div class="grid2"><div>
-      <div class="toolbar"><select data-filter="sfCol"><option value="">All products</option>${cols.map((c) => `<option value="${c.id}"${c.id === col ? ' selected' : ''}>${esc(c.title)}</option>`).join('')}</select>${filterInput('sfQ', 'Search')}</div>
+    titleHtml: 'Storefront',
+    subtitle: `Shop ${esc(store().name)} as a customer would. Checkout creates a real order in the admin.`,
+    html: `<div class="storefront-banner"><h2>${esc(store().name)}</h2><div class="tiny">${esc(store().domain)} — simulated shopper view</div></div>
+    <div class="layout"><div>
+      <div class="card" style="padding:var(--s-3) var(--s-4)"><div class="toolbar" style="margin:0"><select data-filter="sfCol"><option value="">All products</option>${cols.map((c) => `<option value="${c.id}"${c.id === col ? ' selected' : ''}>${esc(c.title)}</option>`).join('')}</select>${filterInput('sfQ', 'Search')}</div></div>
       <div class="store-grid">${items.map((p) => `<div class="product-card"><div class="swatch" style="background:${swatchColor(p.id)}">${esc(p.title.split(' ').map((w) => w[0]).join('').slice(0, 3))}</div>
-        <strong>${esc(p.title)}</strong><div>${money(p.minPriceCents)}${p.variants[0].compareAtCents ? `<span class="strike">${money(p.variants[0].compareAtCents)}</span>` : ''}</div>
+        <strong>${esc(p.title)}</strong><div class="price">${money(p.minPriceCents)}${p.variants[0].compareAtCents ? `<span class="strike">${money(p.variants[0].compareAtCents)}</span>` : ''}</div>
         <select data-vsel="${p.id}">${p.variants.map((v) => `<option value="${v.id}"${v.available ? '' : ' disabled'}>${esc(v.title)} — ${money(v.priceCents)}${v.available ? '' : ' (sold out)'}</option>`).join('')}</select>
         <button class="btn primary small" data-add="${p.id}"${p.variants.some((v) => v.available) ? '' : ' disabled'}>Add to cart</button></div>`).join('') || '<p class="muted">No products.</p>'}</div>
     </div><div>
       <div class="card"><h2>Cart ${cart ? `<span class="muted tiny">${cart.id}</span>` : ''}</h2>
-      ${cart && cart.lines.length ? `<table><tbody>${pr.lines.map((l) => `<tr><td>${esc(l.title)}<div class="muted tiny">${esc(l.variantTitle)}</div></td><td><input class="qty" type="number" min="0" value="${l.quantity}" data-cq="${l.variantId}"></td><td class="num">${money(l.priceCents * l.quantity)}</td></tr>`).join('')}</tbody></table>
+      ${cart && cart.lines.length ? `<div class="table-wrap"><table><tbody>${pr.lines.map((l) => `<tr><td>${esc(l.title)}<div class="muted tiny">${esc(l.variantTitle)}</div></td><td><input class="qty" type="number" min="0" value="${l.quantity}" data-cq="${l.variantId}"></td><td class="num">${money(l.priceCents * l.quantity)}</td></tr>`).join('')}</tbody></table></div>
         <div class="toolbar" style="margin-top:8px"><input id="code-in" placeholder="Discount code" value="${esc(cart.discountCode || '')}"><button class="btn small" id="code-apply">Apply</button></div>
         ${view.discountError ? `<div class="tiny" style="color:var(--bad)">${esc(view.discountError)}</div>` : ''}
-        <dl class="kv"><dt>Subtotal</dt><dd>${money(pr.subtotalCents)}</dd><dt>Discount</dt><dd>${pr.discountCode ? `${esc(pr.discountCode)} −${money(pr.discountCents + pr.shippingDiscountCents)}` : '—'}</dd><dt>Shipping</dt><dd>${money(pr.shippingCents - pr.shippingDiscountCents)} <span class="muted tiny">(standard)</span></dd><dt>Tax</dt><dd>${money(pr.taxCents)}</dd><dt><strong>Total</strong></dt><dd><strong>${money(pr.totalCents)}</strong></dd></dl>
-        <button class="btn primary" id="checkout" style="margin-top:10px;width:100%">Checkout</button>` : '<p class="muted">Your cart is empty.</p>'}</div>
+        <dl class="sum"><dt>Subtotal</dt><dd>${money(pr.subtotalCents)}</dd><dt>Discount ${pr.discountCode ? `<span class="tag">${esc(pr.discountCode)}</span>` : ''}</dt><dd>${pr.discountCode ? `−${money(pr.discountCents + pr.shippingDiscountCents)}` : '—'}</dd><dt>Shipping <span class="muted tiny">standard</span></dt><dd>${money(pr.shippingCents - pr.shippingDiscountCents)}</dd><dt>Tax</dt><dd>${money(pr.taxCents)}</dd><dt class="total">Total</dt><dd class="total">${money(pr.totalCents)}</dd></dl>
+        <button class="btn primary" id="checkout" style="margin-top:10px;width:100%">Checkout</button>` : '<p class="muted">Your cart is empty. Add a product to start a checkout.</p>'}</div>
     </div></div>`,
     wire(root) {
       wireFilters(root);
@@ -848,24 +962,27 @@ PAGES.storefront = () => {
 
 // ---- tasks & API
 PAGES.tasks = () => {
-  const html = `<div class="card" id="active-task"></div><div class="card"><h2>Agent tasks</h2><div id="task-list" class="muted">Loading…</div></div>`;
+  const html = `<div class="card" id="active-task"></div><div class="card flush"><h2>All tasks</h2><div id="task-list" class="card-section muted">Loading…</div></div>`;
   return {
     title: 'Agent tasks',
+    subtitle: 'Seeded scenarios with automatic checkers. Starting a task resets the world to its seed.',
     html,
     async wire(root) {
       const list = await cw.listTasks();
       const active = list.find((t) => t.id === cw.activeTaskId);
       $('#active-task', root).innerHTML = active ? `<h2>Active: ${esc(active.id)} <button class="btn small primary" id="check-task">Check</button></h2><p>${esc(active.prompt)}</p><div id="check-out"></div>` : '<p class="muted">No active task. Starting a task resets the world to the task\'s seed.</p>';
-      $('#task-list', root).innerHTML = `<table><thead><tr><th>ID</th><th>Title</th><th class="num">Seed</th><th></th></tr></thead><tbody>${list.map((t) => `<tr><td>${esc(t.id)}</td><td>${esc(t.title)}<div class="muted tiny">${esc(t.prompt)}</div></td><td class="num">${t.seed}</td><td><button class="btn small" data-start="${esc(t.id)}">Start</button></td></tr>`).join('')}</tbody></table>`;
+      $('#task-list', root).className = '';
+      $('#task-list', root).innerHTML = `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Title</th><th class="num">Seed</th><th></th></tr></thead><tbody>${list.map((t) => `<tr><td>${esc(t.id)}</td><td>${esc(t.title)}<div class="muted tiny">${esc(t.prompt)}</div></td><td class="num">${t.seed}</td><td class="num"><button class="btn small${t.id === cw.activeTaskId ? ' primary' : ''}" data-start="${esc(t.id)}">${t.id === cw.activeTaskId ? 'Restart' : 'Start'}</button></td></tr>`).join('')}</tbody></table></div>`;
       $$('[data-start]', root).forEach((b) => { b.onclick = async () => { await cw.startTask(b.dataset.start); toast(`Started ${b.dataset.start}`); render(); }; });
       const cb = $('#check-task', root);
-      if (cb) cb.onclick = async () => { const r = await cw.checkTask(); $('#check-out', root).innerHTML = r.pass ? '<p class="pill paid">PASS</p>' : `<p class="pill refunded">FAIL</p><ul>${(r.reasons || [r.error?.message]).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`; };
+      if (cb) cb.onclick = async () => { const r = await cw.checkTask(); $('#check-out', root).innerHTML = r.pass ? '<div class="check pass"><span class="pill paid">PASS</span> The checker accepted the current state.</div>' : `<div class="check fail"><span class="pill refunded">FAIL</span><ul>${(r.reasons || [r.error?.message]).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`; };
     },
   };
 };
 
 PAGES.api = () => ({
   title: 'API',
+  subtitle: 'Drive the simulator programmatically from the browser console or over HTTP.',
   html: `<div class="card"><h2>Browser API — <code>window.cartwright</code></h2><p>Open the developer console: every admin action is available as <code>cartwright.&lt;action&gt;(params)</code> or <code>cartwright.dispatch(name, params)</code>; reads via <code>cartwright.query(name, params)</code>. State persists in localStorage as the seed plus the action log.</p><pre class="code">${esc(cw.help())}</pre></div>
   <div class="card"><h2>REST server</h2><p>Run <code>npm start</code> for an Express server exposing the same actions (<code>POST /api/actions/:name</code>), queries (<code>POST /api/queries/:name</code>), resource-style routes (<code>/api/orders/:id/fulfillments</code>, …), <code>POST /reset</code> and task endpoints. See README.md.</p></div>`,
   wire() {},
@@ -884,6 +1001,8 @@ function render() {
   $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === r.nav));
   const sel = $('#store-select');
   sel.innerHTML = S().stores.map((s) => `<option value="${s.id}"${s.id === ui.store ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+  $('#store-avatar').textContent = initials(store().name);
+  $('#top-store').textContent = store().domain || store().name;
   $('#clock').textContent = `${S().meta.today} ${S().meta.time}`;
   $('#seed-input').value = cw.seed;
   $('#session-info').textContent = `${S().actionLog.length} actions this session${cw.activeTaskId ? ` · task ${cw.activeTaskId}` : ''}`;
@@ -891,18 +1010,63 @@ function render() {
   try {
     page = PAGES[r.page](r.id);
   } catch (e) {
-    page = { title: 'Not found', html: `<div class="card"><p>${esc(e.message)}</p></div>`, wire() {} };
+    page = { title: 'Not found', subtitle: 'The page or record you asked for does not exist in this store.', html: `<div class="card"><p>${esc(e.message)}</p><a class="btn" href="#/home">Back to home</a></div>`, wire() {} };
   }
   if (r.page === 'product' || r.page === 'collection' || r.page === 'customer' || r.page === 'order') {
     const ent = get({ product: 'products', collection: 'collections', customer: 'customers', order: 'orders' }[r.page], r.id);
     if (ent && ent.storeId !== ui.store) { ui.store = ent.storeId; localStorage.setItem('cartwright:ui:store', ui.store); sel.value = ui.store; }
   }
+  $('#crumbs').innerHTML = (page.crumbs || []).map(([label, href]) => `<a href="${href}">${icon('back')}${esc(label)}</a>`).join('<span class="sep">/</span>');
   $('#page-title').innerHTML = page.titleHtml || esc(page.title);
+  $('#page-subtitle').innerHTML = page.subtitle || '';
+  $('#page-actions').innerHTML = page.actions || '';
   document.title = `${page.title} · Cartwright`;
-  const view = $('#view');
-  view.innerHTML = page.html;
-  page.wire(view);
+  $('#view').innerHTML = page.html;
+  // Header actions live outside #view, so pages wire against the whole page container.
+  page.wire($('#page'));
 }
+
+// ---- global search ---------------------------------------------------------------------------
+const gs = { hits: [], sel: 0 };
+function searchHits(q) {
+  const sid = ui.store;
+  const groups = [
+    ['Orders', Q('listOrders', { storeId: sid, q, status: 'any', limit: 5 }).items.map((o) => ({ href: `#/orders/${o.id}`, label: o.name, meta: `${custName(o.customerId)} · ${money(o.totalCents)}` }))],
+    ['Products', Q('listProducts', { storeId: sid, q, limit: 5 }).items.map((p) => ({ href: `#/products/${p.id}`, label: p.title, meta: `${p.totalInventory} in stock` }))],
+    ['Customers', Q('listCustomers', { storeId: sid, q, limit: 5 }).items.map((c) => ({ href: `#/customers/${c.id}`, label: `${c.firstName} ${c.lastName}`.trim() || c.email, meta: c.email }))],
+  ];
+  return groups.filter(([, items]) => items.length);
+}
+function renderSearch() {
+  const input = $('#global-search');
+  const pop = $('#search-pop');
+  const q = input.value.trim();
+  if (!q) { pop.hidden = true; gs.hits = []; return; }
+  const groups = searchHits(q);
+  gs.hits = groups.flatMap(([, items]) => items);
+  gs.sel = Math.min(gs.sel, Math.max(0, gs.hits.length - 1));
+  let i = 0;
+  pop.innerHTML = groups.length ? groups.map(([name, items]) => `<h4>${name}</h4>${items.map((h) => { const n = i++; return `<a href="${h.href}" data-i="${n}"${n === gs.sel ? ' class="sel"' : ''}><span>${esc(h.label)}</span><small>${esc(h.meta)}</small></a>`; }).join('')}`).join('') : `<div class="empty">No results for “${esc(q)}”.</div>`;
+  pop.hidden = false;
+}
+function closeSearch() { $('#search-pop').hidden = true; }
+$('#global-search').addEventListener('input', () => { gs.sel = 0; renderSearch(); });
+$('#global-search').addEventListener('focus', renderSearch);
+$('#global-search').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); gs.sel = (gs.sel + (e.key === 'ArrowDown' ? 1 : -1) + gs.hits.length) % Math.max(1, gs.hits.length); renderSearch(); }
+  if (e.key === 'Enter' && gs.hits[gs.sel]) { location.hash = gs.hits[gs.sel].href; e.target.value = ''; e.target.blur(); closeSearch(); }
+  if (e.key === 'Escape') { e.target.blur(); closeSearch(); }
+});
+$('#search-pop').addEventListener('mousedown', (e) => { if (e.target.closest('a')) { $('#global-search').value = ''; } });
+document.addEventListener('mousedown', (e) => { if (!e.target.closest('.global-search')) closeSearch(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === '/' && !e.target.closest('input,textarea,select') && !$('#modal-root').children.length) { e.preventDefault(); $('#global-search').focus(); }
+});
+
+// ---- responsive sidebar
+const setNav = (open) => document.body.classList.toggle('nav-open', open);
+$('#menu-btn').onclick = () => setNav(!document.body.classList.contains('nav-open'));
+$('#scrim').onclick = () => setNav(false);
 
 $('#store-select').onchange = (e) => {
   ui.store = e.target.value;
@@ -919,6 +1083,6 @@ $('#reset-btn').onclick = () => {
   toast(`Reset to seed ${seed}`);
   render();
 };
-window.addEventListener('hashchange', () => { closeModal(); render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { closeModal(); closeSearch(); setNav(false); render(); window.scrollTo(0, 0); });
 cw.subscribe((evt) => { if (evt.kind !== 'action') render(); });
 render();

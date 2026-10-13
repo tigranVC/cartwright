@@ -8,40 +8,68 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b3fd6'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23f2a541' stroke-width='3'/%3E%3Cpath d='M16 7v18M7 16h18' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E">
 </head>
 <body>
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#5b3fd6"/><circle cx="16" cy="16" r="9" fill="none" stroke="#f2a541" stroke-width="3"/><path d="M16 7v18M7 16h18" stroke="#fff" stroke-width="2"/></svg>
+      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#5b3fd6"/><circle cx="16" cy="16" r="9" fill="none" stroke="#f2a541" stroke-width="3"/><path d="M16 7v18M7 16h18" stroke="#fff" stroke-width="2"/></svg>
       <div><strong>Cartwright</strong><small>merchant admin simulator</small></div>
     </div>
+    <label class="store-switch">
+      <span class="store-avatar" id="store-avatar" aria-hidden="true"></span>
+      <span class="store-switch-body"><small>Store</small><select id="store-select" aria-label="Store"></select></span>
+      <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg>
+    </label>
     <nav id="nav">
-      <a href="#/home" data-route="home">Home</a>
-      <a href="#/orders" data-route="orders">Orders</a>
-      <a href="#/returns" data-route="returns">Returns</a>
-      <a href="#/products" data-route="products">Products</a>
-      <a href="#/inventory" data-route="inventory">Inventory</a>
-      <a href="#/collections" data-route="collections">Collections</a>
-      <a href="#/customers" data-route="customers">Customers</a>
-      <a href="#/discounts" data-route="discounts">Discounts</a>
-      <a href="#/analytics" data-route="analytics">Analytics</a>
-      <a href="#/storefront" data-route="storefront">Storefront ↗</a>
-      <a href="#/tasks" data-route="tasks">Agent tasks</a>
-      <a href="#/api" data-route="api">API</a>
+      <a href="#/home" data-route="home"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 9.5L10 4l7 5.5V16a1 1 0 0 1-1 1h-3.5v-4.5h-5V17H4a1 1 0 0 1-1-1z"/></svg>Home</a>
+      <a href="#/orders" data-route="orders"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 6.5h13l-1.2 9.2a1.5 1.5 0 0 1-1.5 1.3H6.2a1.5 1.5 0 0 1-1.5-1.3z"/><path d="M7 8.5V5.5a3 3 0 0 1 6 0v3"/></svg>Orders</a>
+      <a href="#/returns" data-route="returns" class="sub"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5L3.5 8.5 7 12"/><path d="M4 8.5h8a4.5 4.5 0 0 1 0 9H9"/></svg>Returns</a>
+      <a href="#/products" data-route="products"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10.5 3H16a1 1 0 0 1 1 1v5.5L9.8 16.7a1 1 0 0 1-1.4 0l-5.1-5.1a1 1 0 0 1 0-1.4z"/><circle cx="13.3" cy="6.7" r="1.2"/></svg>Products</a>
+      <a href="#/inventory" data-route="inventory" class="sub"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8l6.5 3.4v7.6L10 17.2l-6.5-3.4V6.2z"/><path d="M3.5 6.2L10 9.6l6.5-3.4M10 9.6v7.6"/></svg>Inventory</a>
+      <a href="#/collections" data-route="collections" class="sub"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.2"/><rect x="11" y="3" width="6" height="6" rx="1.2"/><rect x="3" y="11" width="6" height="6" rx="1.2"/><rect x="11" y="11" width="6" height="6" rx="1.2"/></svg>Collections</a>
+      <a href="#/customers" data-route="customers"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.2"/><path d="M3.8 17a6.2 6.2 0 0 1 12.4 0"/></svg>Customers</a>
+      <a href="#/discounts" data-route="discounts"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M7 13l6-6"/><circle cx="7.5" cy="7.5" r=".9"/><circle cx="12.5" cy="12.5" r=".9"/></svg>Discounts</a>
+      <a href="#/analytics" data-route="analytics"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17h14"/><path d="M5.5 14V10M10 14V5M14.5 14V8"/></svg>Analytics</a>
+      <div class="nav-section">Sales channels</div>
+      <a href="#/storefront" data-route="storefront"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8l1.3-4h11.4L17 8"/><path d="M3 8a2.3 2.3 0 0 0 4.7 0 2.3 2.3 0 0 0 4.6 0A2.3 2.3 0 0 0 17 8"/><path d="M4.5 10.5V17h11v-6.5M8.5 17v-4h3v4"/></svg>Storefront</a>
+      <div class="nav-section">Developer</div>
+      <a href="#/tasks" data-route="tasks"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="3.5" width="12" height="14" rx="1.5"/><path d="M7.5 3.5V2.5h5v1"/><path d="M7 10l2 2 4-4"/></svg>Agent tasks</a>
+      <a href="#/api" data-route="api"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 6l-4 4 4 4M13 6l4 4-4 4M11 4.5l-2 11"/></svg>API</a>
     </nav>
     <div class="sim-box">
-      <div class="sim-clock" id="clock"></div>
-      <label>Seed <input id="seed-input" type="text" size="8"></label>
-      <button id="reset-btn" class="btn danger small">Reset to seed</button>
+      <div class="sim-row"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l2.5 2"/></svg><span class="sim-clock" id="clock"></span></div>
+      <div class="sim-row">
+        <label for="seed-input">Seed</label><input id="seed-input" type="text" size="8">
+        <button id="reset-btn" class="btn danger small">Reset</button>
+      </div>
       <div class="muted tiny" id="session-info"></div>
     </div>
   </aside>
+  <div class="scrim" id="scrim"></div>
   <main>
     <header class="topbar">
-      <h1 id="page-title">Home</h1>
-      <div class="top-controls">
-        <label>Store <select id="store-select"></select></label>
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open navigation"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg></button>
+      <div class="global-search">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5"/><path d="M12.3 12.3L17 17"/></svg>
+        <input id="global-search" type="search" placeholder="Search orders, products, customers" autocomplete="off" aria-label="Search">
+        <kbd>/</kbd>
+        <div class="search-pop" id="search-pop" hidden></div>
+      </div>
+      <div class="top-user">
+        <span class="top-store" id="top-store"></span>
+        <span class="user-avatar" aria-hidden="true">SO</span>
+        <span class="user-meta"><strong>Store owner</strong><small>Simulated session</small></span>
       </div>
     </header>
-    <section id="view"></section>
+    <div id="page">
+      <header class="page-header">
+        <div class="page-heading">
+          <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+          <h1 id="page-title">Home</h1>
+          <p class="page-subtitle" id="page-subtitle"></p>
+        </div>
+        <div class="page-actions" id="page-actions"></div>
+      </header>
+      <section id="view"></section>
+    </div>
   </main>
   <div id="modal-root"></div>
   <div id="toasts"></div>
