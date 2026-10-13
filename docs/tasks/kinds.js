@@ -6,6 +6,7 @@
 import {
   byId, validateState, fmtMoney, addDays, CARRIERS, lineRefundAmounts, customerStats, topProducts, collectionProductIds,
   chooseLocation, priceLines, customerUsedDiscount, findDiscountByCode, discountStatus, hasTag, customerName, dateOf, trackingNumberFor,
+  fulfillableQty,
 } from '../core/index.js';
 
 // ---- helpers -----------------------------------------------------------------
@@ -50,6 +51,63 @@ function stockDeltaCheck(c, initial, final, expect, label) {
 }
 const randCode = (rng, stem) => `${stem}${rng.int(10, 99)}`;
 const NEW_TITLES = [['Lantern Bay', 'Overshirt'], ['Driftwood', 'Henley'], ['Kettle Ridge', 'Camp Shirt'], ['Saltmarsh', 'Utility Tee'], ['Pinecrest', 'Quarter Zip'], ['Bramble', 'Work Shirt']];
+
+// ---- helpers for the hard (multi-step) kinds -------------------------------------
+const lc = (t) => String(t).trim().toLowerCase();
+const sameTagSet = (a, b) => JSON.stringify([...new Set(a.map(lc))].sort()) === JSON.stringify([...new Set(b.map(lc))].sort());
+const orderSig = (o) => JSON.stringify([o.status, o.financialStatus, o.fulfillmentStatus, o.email, [...o.tags].map(lc).sort(), o.note, o.lineItems.map((l) => [l.fulfilledQty, l.refundedQty, l.removedQty])]);
+const custSig = (c) => JSON.stringify([c.firstName, c.lastName, c.email, c.phone, c.acceptsMarketing, [...c.tags].map(lc).sort(), c.note, c.addresses]);
+const addDelta = (m, k, d) => m.set(k, (m.get(k) || 0) + d);
+/** variantId -> units still waiting to ship on non-cancelled orders assigned to `loc`. */
+function pendingByVariant(s, loc) {
+  const m = new Map();
+  for (const o of s.orders) {
+    if (o.status === 'cancelled' || o.locationId !== loc) continue;
+    for (const li of o.lineItems) if (fulfillableQty(li) > 0) addDelta(m, li.variantId, fulfillableQty(li));
+  }
+  return m;
+}
+/** Exactly one more unit of a line refunded (item + tax, no shipping, no restock, given reason); other lines untouched. */
+function oneUnitRefundCheck(c, initial, final, orderId, lineItemId, reason, { skipStock = false } = {}) {
+  const o0 = get(initial, 'orders', orderId);
+  const li0 = o0.lineItems.find((l) => l.id === lineItemId);
+  const o = get(final, 'orders', orderId);
+  c.need(o.lineItems.find((l) => l.id === lineItemId).refundedQty === li0.refundedQty + 1, `exactly one unit of ${li0.sku} should be refunded on ${o0.name}`);
+  c.need(o.lineItems.every((l) => l.id === lineItemId || l.refundedQty === o0.lineItems.find((x) => x.id === l.id).refundedQty), `other items on ${o0.name} must not be refunded`);
+  const refs = newRefunds(initial, final, orderId);
+  const want = lineRefundAmounts(li0, 1);
+  c.need(sumBy(refs, (r) => r.amountCents) === want.subtotalCents + want.taxCents, `${o0.name}: refunded ${fmtMoney(sumBy(refs, (r) => r.amountCents))}, expected ${fmtMoney(want.subtotalCents + want.taxCents)}`);
+  c.need(sumBy(refs, (r) => r.shippingCents) === 0, `${o0.name}: shipping must not be refunded`);
+  c.need(refs.every((r) => r.lineItems.every((x) => !x.restock)), `${o0.name}: the refunded unit must not be restocked`);
+  c.need(refs.length > 0 && refs.every((r) => r.reason === reason), `${o0.name}: refund reason should be ${reason}`);
+  if (!skipStock) stockDeltaCheck(c, initial, final, new Map([[`${li0.variantId}|${o0.locationId}`, 0]]), 'inventory');
+}
+/** `tag` must be on exactly the entities in `ids` (plus any that already had it initially). */
+function tagOnlyOn(c, initial, final, coll, tag, ids) {
+  for (const e0 of initial[coll]) {
+    const has = hasTag(get(final, coll, e0.id).tags, tag);
+    if (ids.has(e0.id)) c.need(has, `${e0.id} should be tagged ${tag}`);
+    else if (!hasTag(e0.tags, tag)) c.need(!has, `${e0.id} should not be tagged ${tag}`);
+  }
+}
+/** Retail top-up plan: rows {variantId, move, short} and the set of products to tag reorder. */
+function retailPlan(s, p) {
+  const rows = [];
+  const reorder = new Set();
+  for (const pr of s.products) {
+    if (pr.storeId !== p.storeId || pr.status !== 'active' || pr.vendor !== p.vendor || pr.productType !== p.productType) continue;
+    for (const id of pr.variantIds) {
+      const v = get(s, 'variants', id);
+      const cur = inv(s, id, p.retailId);
+      if (v.inventoryPolicy !== 'deny' || cur >= p.below) continue;
+      const need = p.target - cur;
+      const move = Math.max(0, Math.min(need, inv(s, id, p.warehouseId) - p.reserve));
+      rows.push({ variantId: id, move });
+      if (move < need) reorder.add(pr.id);
+    }
+  }
+  return { rows, reorder };
+}
 
 // ---- kinds ---------------------------------------------------------------------
 export const KINDS = {
@@ -881,6 +939,591 @@ export const KINDS = {
       c.need(hasTag(o.tags, p.tag), `order should be tagged ${p.tag}`);
       c.need(String(o.note).trim() === p.note, 'order note is wrong');
       c.need(o.fulfillmentStatus === 'unfulfilled', 'order must not be fulfilled');
+      integrity(c, final);
+      return c.reasons;
+    },
+  },
+  // ---- hard, multi-step kinds (tagged "hard" in specs.js) ------------------------------
+  complaint_refund_coupon: {
+    title: 'Resolve a damaged-item complaint: partial refund, apology code, tags and note',
+    candidates(s, rng) {
+      const counts = new Map();
+      for (const o of s.orders) if (o.customerId) counts.set(o.customerId, (counts.get(o.customerId) || 0) + 1);
+      const out = [];
+      for (const o of rng.shuffle(s.orders.filter((x) => x.status === 'open' && x.fulfillmentStatus === 'fulfilled' && x.financialStatus === 'paid' && x.lineItems.length >= 2 && x.customerId && !x.note && (counts.get(x.customerId) || 0) >= 2))) {
+        const li = rng.pick(o.lineItems.filter((l) => l.sku && l.refundedQty === 0 && l.priceCents * l.quantity - l.discountCents > 0));
+        if (!li) continue;
+        const code = `SORRY${rng.int(100, 999)}`;
+        out.push({ storeId: o.storeId, orderId: o.id, lineItemId: li.id, customerId: o.customerId, code, percent: rng.pick([15, 20, 25]), endsAt: addDays(s.meta.today, rng.pick([30, 60, 90])), customerTag: 'service-recovery', orderTag: 'complaint', note: `Damaged ${li.sku}: refunded 1 unit, sent code ${code}` });
+        if (out.length >= 40) break;
+      }
+      return out;
+    },
+    feasible: (s, p) => !findDiscountByCode(s, p.storeId, p.code),
+    prompt(s, p) {
+      const o = get(s, 'orders', p.orderId);
+      const li = o.lineItems.find((l) => l.id === p.lineItemId);
+      return `${custLabel(s, p.customerId)} emailed about order ${orderLabel(s, o)}: one unit of "${li.title}" (${li.variantTitle}) arrived damaged and they have thrown it away. Please resolve it: ` +
+        `(1) refund that one unit — its item price and tax only, no shipping — with refund reason "damaged" and without restocking it; ` +
+        `(2) create a discount code ${p.code} in that store for ${p.percent}% off the entire order, no minimum, usable only once in total (usage limit 1), active from today through ${p.endsAt}; ` +
+        `(3) tag the customer "${p.customerTag}"; (4) tag the order "${p.orderTag}" and set its note to exactly "${p.note}". ` +
+        'Do not refund or change anything else on this order or on the customer\'s other orders.';
+    },
+    solve(env, p) {
+      env.act('createRefund', { orderId: p.orderId, lineItems: [{ lineItemId: p.lineItemId, quantity: 1, restock: false }], reason: 'damaged' });
+      env.act('createDiscount', { storeId: p.storeId, code: p.code, type: 'percentage', value: p.percent, usageLimit: 1, endsAt: p.endsAt });
+      env.act('addTags', { resource: 'customer', id: p.customerId, tags: [p.customerTag] });
+      env.act('addTags', { resource: 'order', id: p.orderId, tags: [p.orderTag] });
+      env.act('updateOrder', { orderId: p.orderId, note: p.note });
+    },
+    check(final, initial, p) {
+      const c = checker();
+      oneUnitRefundCheck(c, initial, final, p.orderId, p.lineItemId, 'damaged');
+      const d = findDiscountByCode(final, p.storeId, p.code);
+      if (c.need(d && !get(initial, 'discounts', d.id), `discount ${p.code} was not created in ${p.storeId}`)) {
+        c.need(d.type === 'percentage' && d.value === p.percent, `${p.code} should be ${p.percent}% off`);
+        c.need(d.scope === 'all' && d.minType === 'none', `${p.code} should apply to the entire order with no minimum`);
+        c.need(d.usageLimit === 1, `${p.code} should have a usage limit of 1`);
+        c.need(d.endsAt === p.endsAt, `${p.code} should end on ${p.endsAt}`);
+        c.need(discountStatus(d, final.meta.today) === 'active', `${p.code} should be active today`);
+      }
+      c.need(hasTag(get(final, 'customers', p.customerId).tags, p.customerTag), `customer should be tagged ${p.customerTag}`);
+      const o = get(final, 'orders', p.orderId);
+      c.need(hasTag(o.tags, p.orderTag), `order should be tagged ${p.orderTag}`);
+      c.need(String(o.note).trim() === p.note, 'order note is wrong');
+      tagOnlyOn(c, initial, final, 'customers', p.customerTag, new Set([p.customerId]));
+      for (const o0 of initial.orders.filter((x) => x.customerId === p.customerId && x.id !== p.orderId)) c.need(orderSig(get(final, 'orders', o0.id)) === orderSig(o0), `the customer's other order ${o0.name} must not change`);
+      integrity(c, final);
+      return c.reasons;
+    },
+  },
+
+  process_return_queue: {
+    title: 'Process all pending return requests of a store under a return-window policy',
+    candidates(s, rng) {
+      const out = [];
+      for (const storeId of rng.shuffle(STORE_IDS)) {
+        const reqs = s.returns.filter((r) => r.storeId === storeId && r.status === 'requested');
+        if (reqs.length < 3 || reqs.length > 12) continue;
+        for (const days of rng.shuffle([14, 18, 21, 25])) {
+          const cutoff = addDays(s.meta.today, -days);
+          const old = (r) => dateOf(get(s, 'orders', r.orderId).createdAt) <= cutoff;
+          const decline = reqs.filter(old);
+          if (decline.length < 1 || reqs.length - decline.length < 2) continue;
+          out.push({ storeId, days, cutoff, note: `Outside the ${days}-day return window`, declineIds: decline.map((r) => r.id), approveIds: reqs.filter((r) => !old(r)).map((r) => r.id) });
+        }
+      }
+      return out;
+    },
+    prompt(s, p) {
+      return `Work through every return request waiting for review (status "requested") in ${storeName(s, p.storeId)} and apply our return policy to each: ` +
+        `(a) if the order was placed on or before ${p.cutoff} (${p.days} or more days ago), decline the request with the note "${p.note}"; ` +
+        '(b) otherwise approve it and refund the returned items (not shipping) so that the return ends up closed; restock the returned units at the order\'s assigned location, ' +
+        'except when the return reason is "defective" — those are refunded without restocking. ' +
+        'Do not touch returns in other stores or returns that are not in "requested" status.';
+    },
+    solve(env, p) {
+      for (const r of env.query('listReturns', { storeId: p.storeId, status: 'requested' }).items) {
+        const o = env.query('getOrder', { orderId: r.orderId });
+        if (dateOf(o.createdAt) <= p.cutoff) env.act('declineReturn', { returnId: r.id, note: p.note });
+        else {
+          env.act('approveReturn', { returnId: r.id });
+          env.act('refundReturn', { returnId: r.id, restock: !r.lineItems.every((l) => l.reason === 'defective') });
+        }
+      }
+    },
+    check(final, initial, p) {
+      const c = checker();
+      const targets = new Set([...p.declineIds, ...p.approveIds]);
+      const decline = new Set(p.declineIds);
+      const expect = new Map();
+      const amountByOrder = new Map();
+      for (const id of targets) {
+        const r0 = get(initial, 'returns', id);
+        const r = get(final, 'returns', id);
+        const o0 = get(initial, 'orders', r0.orderId);
+        if (decline.has(id)) {
+          c.need(r.status === 'declined', `return ${id} (order ${o0.name}) should be declined, is ${r.status}`);
+          c.need(sameStr(r.note, p.note), `return ${id} should have the note "${p.note}"`);
+          c.need(newRefunds(initial, final, o0.id).length === 0, `no refund should be issued on ${o0.name} (declined return ${id})`);
+          for (const x of r0.lineItems) addDelta(expect, `${o0.lineItems.find((l) => l.id === x.lineItemId).variantId}|${o0.locationId}`, 0);
+          continue;
+        }
+        c.need(r.status === 'closed', `return ${id} (order ${o0.name}) should be approved, refunded and closed, is ${r.status}`);
+        for (const x of r0.lineItems) {
+          const li = o0.lineItems.find((l) => l.id === x.lineItemId);
+          const a = lineRefundAmounts(li, x.quantity);
+          amountByOrder.set(o0.id, (amountByOrder.get(o0.id) || 0) + a.subtotalCents + a.taxCents);
+          addDelta(expect, `${li.variantId}|${o0.locationId}`, x.reason === 'defective' ? 0 : x.quantity);
+        }
+      }
+      for (const [orderId, amount] of amountByOrder) {
+        const refs = newRefunds(initial, final, orderId);
+        c.need(sumBy(refs, (x) => x.amountCents) === amount, `${get(initial, 'orders', orderId).name}: refunded ${fmtMoney(sumBy(refs, (x) => x.amountCents))}, expected ${fmtMoney(amount)}`);
+        c.need(sumBy(refs, (x) => x.shippingCents) === 0, `${get(initial, 'orders', orderId).name}: shipping must not be refunded`);
+      }
+      stockDeltaCheck(c, initial, final, expect, 'restock');
+      for (const r0 of initial.returns) if (!targets.has(r0.id)) c.need(get(final, 'returns', r0.id).status === r0.status, `return ${r0.id} (not part of the queue) changed status`);
+      integrity(c, final);
+      return c.reasons;
+    },
+  },
+
+  replace_damaged_item: {
+    title: 'Replace a broken item: refund, stock transfer, replacement order and shipment',
+    candidates(s, rng) {
+      const out = [];
+      for (const o of rng.shuffle(s.orders.filter((x) => x.status === 'open' && x.fulfillmentStatus === 'fulfilled' && x.financialStatus === 'paid' && x.customerId && x.shippingMethod !== 'pickup'))) {
+        const store = get(s, 'stores', o.storeId);
+        const main = store.locationIds[0];
+        const cu = get(s, 'customers', o.customerId);
+        if (!cu.addresses.some((a) => a.isDefault)) continue;
+        for (const li of o.lineItems) {
+          const v = get(s, 'variants', li.variantId);
+          if (!li.sku || li.refundedQty || li.priceCents * li.quantity - li.discountCents <= 0 || v.inventoryPolicy !== 'deny' || get(s, 'products', v.productId).status !== 'active') continue;
+          if (inv(s, v.id, main) !== 0) continue;
+          const others = store.locationIds.slice(1).sort((a, b) => inv(s, v.id, b) - inv(s, v.id, a));
+          if (inv(s, v.id, others[0]) < 3 || (others[1] && inv(s, v.id, others[1]) === inv(s, v.id, others[0]))) continue;
+          const carrier = rng.pick(CARRIERS);
+          out.push({ storeId: o.storeId, orderId: o.id, lineItemId: li.id, customerId: o.customerId, variantId: v.id, shipFromId: main, sourceId: others[0], transferQty: 2, tag: 'replacement', note: `Replacement for ${o.name}`, carrier, trackingNumber: trackingNumberFor(rng, carrier) });
+          break;
+        }
+        if (out.length >= 30) break;
+      }
+      return out;
+    },
+    prompt(s, p) {
+      const o = get(s, 'orders', p.orderId);
+      const li = o.lineItems.find((l) => l.id === p.lineItemId);
+      return `${custLabel(s, p.customerId)} reports that one unit of ${lineLabel(li)} from order ${orderLabel(s, o)} arrived damaged beyond use; nothing will be sent back. Handle it like this: ` +
+        `(1) on the original order, refund that one unit (item price and tax, no shipping) with reason "damaged", without restocking; ` +
+        `(2) the replacement must ship from ${locName(s, p.shipFromId)}: if that location has no available stock of SKU ${li.sku}, first transfer exactly ${p.transferQty} units of it there from whichever other location of the store currently holds the most; ` +
+        `(3) create a new admin order for the same customer with 1 unit of SKU ${li.sku}, standard shipping to their default address, fulfilled from ${locName(s, p.shipFromId)}, payment status paid (they paid for the replacement by phone), tagged "${p.tag}" and with the note "${p.note}"; ` +
+        `(4) fulfill the new order immediately with ${p.carrier} tracking number ${p.trackingNumber}. Leave the other items on the original order alone.`;
+    },
+    solve(env, p) {
+      env.act('createRefund', { orderId: p.orderId, lineItems: [{ lineItemId: p.lineItemId, quantity: 1, restock: false }], reason: 'damaged' });
+      const v = env.query('getVariant', { variantId: p.variantId });
+      if ((v.inventory[p.shipFromId] ?? 0) <= 0) {
+        const src = Object.keys(v.inventory).filter((l) => l !== p.shipFromId).sort((a, b) => v.inventory[b] - v.inventory[a])[0];
+        env.act('transferInventory', { variantId: p.variantId, fromLocationId: src, toLocationId: p.shipFromId, quantity: p.transferQty });
+      }
+      const { order } = env.act('createOrder', { storeId: p.storeId, customerId: p.customerId, lineItems: [{ variantId: p.variantId, quantity: 1 }], shippingMethod: 'standard', paymentStatus: 'paid', locationId: p.shipFromId, tags: [p.tag], note: p.note });
+      env.act('createFulfillment', { orderId: order.id, trackingCompany: p.carrier, trackingNumber: p.trackingNumber });
+    },
+    check(final, initial, p) {
+      const c = checker();
+      oneUnitRefundCheck(c, initial, final, p.orderId, p.lineItemId, 'damaged', { skipStock: true });
+      const orders = created(initial, final, 'orders').filter((o) => o.customerId === p.customerId);
+      if (c.need(orders.length === 1, `expected exactly 1 new order for ${p.customerId}, found ${orders.length}`)) {
+        const o = orders[0];
+        c.need(o.lineItems.length === 1 && o.lineItems[0].variantId === p.variantId && o.lineItems[0].quantity === 1, 'replacement order should contain exactly 1 unit of the same variant');
+        c.need(o.locationId === p.shipFromId, `replacement should be fulfilled from ${p.shipFromId}, is assigned to ${o.locationId}`);
+        c.need(o.shippingMethod === 'standard', 'replacement should use standard shipping');
+        c.need(o.status === 'open' && o.financialStatus === 'paid', `replacement should be open and paid, is ${o.status}/${o.financialStatus}`);
+        c.need(hasTag(o.tags, p.tag), `replacement should be tagged ${p.tag}`);
+        c.need(String(o.note).trim() === p.note, `replacement note should be "${p.note}"`);
+        c.need(o.fulfillmentStatus === 'fulfilled', `replacement should be fulfilled, is ${o.fulfillmentStatus}`);
+        const fs = final.fulfillments.filter((f) => f.orderId === o.id && f.status === 'success');
+        c.need(fs.length === 1 && sameStr(fs[0].trackingCompany, p.carrier) && String(fs[0].trackingNumber).trim() === p.trackingNumber, 'replacement should ship in one fulfillment with the given tracking');
+      }
+      stockDeltaCheck(c, initial, final, new Map([[`${p.variantId}|${p.shipFromId}`, p.transferQty - 1], [`${p.variantId}|${p.sourceId}`, -p.transferQty]]), 'stock');
+      integrity(c, final);
+      return c.reasons;
+    },
+  },
+
+  vendor_markdown: {
+    title: 'End-of-season markdown with compare-at prices, a collection and a discount',
+    candidates(s, rng) {
+      const groups = new Map();
+      for (const pr of s.products) { const k = `${pr.storeId}|${pr.vendor}|${pr.productType}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(pr); }
+      const out = [];
+      for (const [k, prods] of rng.shuffle([...groups.entries()])) {
+        const eligible = prods.filter((pr) => pr.status === 'active' && pr.variantIds.every((id) => get(s, 'variants', id).compareAtCents == null));
+        const nv = sumBy(eligible, (pr) => pr.variantIds.length);
+        if (eligible.length < 2 || nv < 3 || nv > 18) continue;
+        const [storeId, vendor, productType] = k.split('|');
+        out.push({ storeId, vendor, productType, percent: rng.pick([30, 40]), title: `${vendor} ${productType} Clearance`, code: `CLEAR${rng.int(10, 99)}`, extra: rng.pick([10, 15]), endsAt: addDays(s.meta.today, rng.pick([14, 21, 28])), productIds: eligible.map((pr) => pr.id), distractors: prods.length - eligible.length });
+      }
+      return out.sort((a, b) => (b.distractors > 0) - (a.distractors > 0));
+    },
+    feasible: (s, p) => !findDiscountByCode(s, p.storeId, p.code) && !s.collections.some((x) => x.storeId === p.storeId && sameStr(x.title, p.title)),
+    prompt(s, p) {
+      return `End-of-season markdown for ${p.vendor} ${p.productType} products in ${storeName(s, p.storeId)}. ` +
+        `For every ACTIVE product with vendor ${p.vendor} and product type ${p.productType} that is not already on sale (none of its variants has a compare-at price): on each of its variants set the compare-at price to the current price and lower the price by ${p.percent}% (rounded to the nearest cent). ` +
+        'Leave draft/archived products and products already on sale exactly as they are. ' +
+        `Then create a manual collection titled "${p.title}" containing exactly the products you marked down, and a discount code ${p.code} giving an extra ${p.extra}% off that applies only to that collection, no minimum, active from today through ${p.endsAt}.`;
+    },
+    solve(env, p) {
+      const ids = [];
+      for (const pr of env.query('listProducts', { storeId: p.storeId, vendor: p.vendor, productType: p.productType, status: 'active' }).items) {
+        const full = env.query('getProduct', { productId: pr.id });
+        if (full.variants.some((v) => v.compareAtCents != null)) continue;
+        for (const v of full.variants) env.act('updateVariant', { variantId: v.id, compareAtCents: v.priceCents, priceCents: Math.round((v.priceCents * (100 - p.percent)) / 100) });
+        ids.push(pr.id);
+      }
+      const { collection } = env.act('createCollection', { storeId: p.storeId, title: p.title, type: 'manual', productIds: ids });
+      env.act('createDiscount', { storeId: p.storeId, code: p.code, type: 'percentage', value: p.extra, scope: 'collections', collectionIds: [collection.id], endsAt: p.endsAt });
+    },
+    check(final, initial, p) {
+      const c = checker();
+      const target = new Set(p.productIds);
+      for (const v0 of initial.variants.filter((v) => v.storeId === p.storeId)) {
+        const v = get(final, 'variants', v0.id);
+        if (target.has(v0.productId)) {
+          c.need(v.compareAtCents === v0.priceCents, `${v0.sku || v0.id}: compare-at should be ${fmtMoney(v0.priceCents)}`);
+          const want = Math.round((v0.priceCents * (100 - p.percent)) / 100);
+          c.need(v.priceCents === want, `${v0.sku || v0.id}: price should be ${fmtMoney(want)}, is ${fmtMoney(v.priceCents)}`);
+        } else c.need(v.priceCents === v0.priceCents && v.compareAtCents === v0.compareAtCents, `${v0.sku || v0.id} (${get(initial, 'products', v0.productId).title}) must not be repriced`);
+      }
+      for (const pr0 of initial.products.filter((x) => x.storeId === p.storeId)) c.need(get(final, 'products', pr0.id).status === pr0.status, `${pr0.title} should not change status`);
+      const cols = created(initial, final, 'collections').filter((x) => x.storeId === p.storeId && sameStr(x.title, p.title));
+      if (c.need(cols.length === 1, `expected one new collection titled "${p.title}", found ${cols.length}`)) {
+        const col = cols[0];
+        c.need(col.type === 'manual', 'collection should be manual');
+        const got = [...collectionProductIds(final, col)].sort();
+        c.need(JSON.stringify(got) === JSON.stringify([...p.productIds].sort()), `collection should contain exactly the ${p.productIds.length} marked-down products, has ${got.length}`);
+        const d = findDiscountByCode(final, p.storeId, p.code);
+        if (c.need(d, `discount ${p.code} not found`)) {
+          c.need(d.type === 'percentage' && d.value === p.extra, `${p.code} should be ${p.extra}% off`);
+          c.need(d.scope === 'collections' && d.collectionIds.length === 1 && d.collectionIds[0] === col.id, `${p.code} should apply only to the new collection`);
+          c.need(d.minType === 'none', `${p.code} should have no minimum`);
+          c.need(d.endsAt === p.endsAt && discountStatus(d, final.meta.today) === 'active', `${p.code} should be active today through ${p.endsAt}`);
+        }
+      }
+      integrity(c, final);
+      return c.reasons;
+    },
+  },
+
+  count_sheet_committed: {
+    title: 'Apply a physical count sheet, netting out units waiting to ship',
+    candidates(s, rng) {
+      const out = [];
+      for (const storeId of rng.shuffle(STORE_IDS)) {
+        const store = get(s, 'stores', storeId);
+        for (const loc of rng.shuffle(store.locationIds)) {
+          const pend = pendingByVariant(s, loc);
+          const ok = (v) => v.inventoryPolicy === 'deny' && v.sku && get(s, 'products', v.productId).status === 'active' && inv(s, v.id, loc) >= 0;
+          const pv = rng.shuffle([...pend.keys()].map((id) => get(s, 'variants', id)).filter(ok)).slice(0, 2);
+          const np = rng.shuffle(s.variants.filter((v) => v.storeId === storeId && ok(v) && !pend.has(v.id))).slice(0, 2);
+          if (pv.length < 1 || np.length < 2) continue;
+          const rows = [...pv, ...np].map((v, i) => {
+            const avail = inv(s, v.id, loc);
+            let delta = i === 0 ? 0 : rng.pick([-2, -1, 1, 3]);
+            if (avail + delta < 0) delta = 2;
+            const pending = pend.get(v.id) || 0;
+            return { variantId: v.id, sku: v.sku, counted: avail + pending + delta, expected: avail + delta };
+          });
+          out.push({ storeId, locationId: loc, rows: rng.shuffle(rows) });
+        }
+      }
+      return out;
+    },
+    prompt(s, p) {
+      return `We just did a physical stock count at ${locName(s, p.locationId)} in ${storeName(s, p.storeId)}. Count sheet — units physically on the shelf: ${p.rows.map((x) => `SKU ${x.sku}: ${x.counted}`).join('; ')}. ` +
+        `Units that belong to orders assigned to this location but not shipped yet are still on the shelf, yet they were already deducted from "available" when the orders were placed. ` +
+        `So for each SKU on the sheet, set its available quantity at ${locName(s, p.locationId)} to the counted number minus the units still waiting to ship from this location (ordered but not yet fulfilled on non-cancelled orders, not counting refunded or removed units). ` +
+        'Record the changes as cycle-count adjustments. Do not fulfill or edit any orders and do not change stock at other locations or for other SKUs.';
+    },
+    solve(env, p) {
+      for (const x of p.rows) {
+        let waiting = 0;
+        for (const o of env.query('listOrders', { storeId: p.storeId, status: 'any', sku: x.sku }).items) {
+          if (o.status === 'cancelled' || o.locationId !== p.locationId) continue;
+          for (const l of o.lineItems) if (l.variantId === x.variantId) waiting += l.quantity - l.fulfilledQty - l.removedQty;
+        }
+        env.act('setInventory', { variantId: x.variantId, locationId: p.locationId, quantity: x.counted - waiting, reason: 'cycle_count' });
+      }
+    },
+    check(final, initial, p) {
+      const c = checker();
+      stockDeltaCheck(c, initial, final, new Map(p.rows.map((x) => [`${x.variantId}|${p.locationId}`, x.expected - inv(initial, x.variantId, p.locationId)])), 'count');
+      const rowIds = new Set(p.rows.map((x) => x.variantId));
+      const adj = created(initial, final, 'inventoryAdjustments');
+      c.need(adj.filter((a) => rowIds.has(a.variantId)).every((a) => a.reason === 'cycle_count'), 'stock changes should be recorded with reason cycle_count');
+      const others = adj.filter((a) => !rowIds.has(a.variantId) && a.storeId === p.storeId);
+      c.need(others.length === 0, `stock of SKUs not on the count sheet changed: ${[...new Set(others.map((a) => a.sku))].slice(0, 5).join(', ')}`);
+      c.need(created(initial, final, 'fulfillments').length === 0, 'no orders should be fulfilled');
+      integrity(c, final);
+      return c.reasons;
+    },
+  },
+
+  fulfill_express_batch: {
+    title: 'Ship all paid express orders from a date window with carrier rules',
+    candidates(s, rng) {
+      const out = [];
+      for (const storeId of rng.shuffle(STORE_IDS)) {
+        for (let back = 0; back <= 30; back++) {
+          for (const len of [3, 5]) {
+            const to = addDays(s.meta.today, -back);
+            const from = addDays(to, -(len - 1));
+            const inWin = s.orders.filter((o) => o.storeId === storeId && o.status === 'open' && dateOf(o.createdAt) >= from && dateOf(o.createdAt) <= to);
+            const targets = inWin.filter((o) => o.shippingMethod === 'express' && o.financialStatus === 'paid' && o.fulfillmentStatus === 'unfulfilled');
+            const distract = inWin.filter((o) => !targets.includes(o) && o.fulfillmentStatus !== 'fulfilled');
+            if (targets.length < 3 || targets.length > 8 || distract.length < 2) continue;
+            const thr = [10000, 15000, 7500, 20000].find((t) => targets.some((o) => o.totalCents >= t) && targets.some((o) => o.totalCents < t));
+            if (!thr) continue;
+            out.push({ storeId, from, to, thresholdCents: thr, orderIds: targets.map((o) => o.id) });
+          }
+        }
+      }
+      return rng.shuffle(out);
+    },
+    prompt(s, p) {
+      return `Express shipping run for ${storeName(s, p.storeId)}: fulfill every open order placed between ${p.from} and ${p.to} (inclusive) that uses express shipping, is fully paid (payment status "paid") and has nothing shipped yet. ` +
+        `Ship each such order completely in a single fulfillment. Carrier: UPS for orders whose total is ${fmtMoney(p.thresholdCents)} or more, USPS for the others. ` +
+        'Tracking number: "EX" followed by the order number (for example order #1234 gets EX1234). Do not fulfill any other order.';
+    },
+    solve(env, p) {
+      for (const o of env.query('listOrders', { storeId: p.storeId, status: 'open', financialStatus: 'paid', fulfillmentStatus: 'unfulfilled', from: p.from, to: p.to }).items) {
+        if (o.shippingMethod !== 'express') continue;
+        env.act('createFulfillment', { orderId: o.id, trackingCompany: o.totalCents >= p.thresholdCents ? 'UPS' : 'USPS', trackingNumber: `EX${o.number}` });
+      }
+    },
+    check(final, initial, p) {
+      const c = checker();
+      const ids = new Set(p.orderIds);
+      const fs = created(initial, final, 'fulfillments').filter((f) => f.status === 'success');
+      for (const id of p.orderIds) {
+        const o = get(final, 'orders', id);
+        c.need(o.fulfillmentStatus === 'fulfilled', `${o.name} should be fulfilled, is ${o.fulfillmentStatus}`);
+        const mine = fs.filter((f) => f.orderId === id);
+        const carrier = o.totalCents >= p.thresholdCents ? 'UPS' : 'USPS';
+        c.need(mine.length === 1 && sameStr(mine[0].trackingCompany, carrier) && String(mine[0].trackingNumber).trim().toUpperCase() === `EX${o.number}`, `${o.name} should ship in one fulfillment with ${carrier} EX${o.number}`);
+      }
+      const extra = created(initial, final, 'fulfillments').filter((f) => !ids.has(f.orderId));
+      c.need(extra.length === 0, `orders outside the batch were fulfilled: ${[...new Set(extra.map((f) => get(final, 'orders', f.orderId).name))].join(', ')}`);
+      integrity(c, final);
+      return c.reasons;
+    },
+  },
+
+  merge_duplicate_customers: {
+    title: 'Consolidate a duplicate customer record into the original',
+    candidates(s, rng) {
+      const out = [];
+      for (const storeId of rng.shuffle(STORE_IDS)) {
+        const groups = new Map();
+        for (const cu of s.customers.filter((x) => x.storeId === storeId)) { const k = `${cu.firstName}|${cu.lastName}`.toLowerCase(); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(cu); }
+        for (const list of rng.shuffle([...groups.values()].filter((g) => g.length >= 2))) {
+          const [a, b] = rng.shuffle(list).slice(0, 2);
+          if (a.createdAt === b.createdAt) continue;
+          const [prim, sec] = a.createdAt < b.createdAt ? [a, b] : [b, a];
+          const secDef = sec.addresses.find((x) => x.isDefault);
+          if (!secDef || prim.addresses.some((x) => sameStr(x.address1, secDef.address1))) continue;
+          const openOrders = s.orders.filter((o) => o.customerId === sec.id && o.status === 'open' && o.fulfillmentStatus === 'unfulfilled').length;
+          const newTags = sec.tags.filter((t) => !hasTag(prim.tags, t)).length;
+          const score = (openOrders > 0) * 4 + (newTags > 0) * 2 + (list.length > 2) + (sec.acceptsMarketing && !prim.acceptsMarketing);
+          out.push({ storeId, primaryId: prim.id, duplicateId: sec.id, tag: 'merged-duplicate', primaryNote: `Merged duplicate account ${sec.email}`, duplicateNote: `Duplicate of ${prim.email} - do not use`, score });
+        }
+      }
+      return out.sort((x, y) => y.score - x.score);
+    },
+    prompt(s, p) {
+      const a = get(s, 'customers', p.primaryId);
+      const b = get(s, 'customers', p.duplicateId);
+      const [e1, e2] = [a.email, b.email].sort();
+      return `${customerName(a)} in ${storeName(s, p.storeId)} has two customer accounts, ${e1} and ${e2}, and asked us to consolidate them. The account that was created first is the one to keep (the primary); the other is the duplicate. ` +
+        'On the primary: add every tag the duplicate has (keep its own tags), add the duplicate\'s default address as an additional, non-default address (the primary\'s default address must stay the same), ' +
+        `turn on marketing consent if either account had it (otherwise leave it off), and set its note to "Merged duplicate account <duplicate's email>". ` +
+        `On the duplicate: replace all of its tags with just "${p.tag}", turn marketing consent off, and set its note to "Duplicate of <primary's email> - do not use". ` +
+        'Finally, change the contact email to the primary\'s email on every order of the duplicate that is still open and unfulfilled. Do not change either account\'s own email address or the duplicate\'s addresses, and do not touch any other customer or order.';
+    },
+    solve(env, p) {
+      const a = env.query('getCustomer', { customerId: p.primaryId });
+      const b = env.query('getCustomer', { customerId: p.duplicateId });
+      const def = b.addresses.find((x) => x.isDefault);
+      env.act('updateCustomer', { customerId: a.id, tags: [...a.tags, ...b.tags], note: `Merged duplicate account ${b.email}`, acceptsMarketing: a.acceptsMarketing || b.acceptsMarketing });
+      env.act('addCustomerAddress', { customerId: a.id, address1: def.address1, city: def.city, province: def.province, zip: def.zip, country: def.country, firstName: def.firstName, lastName: def.lastName, setDefault: false });
+      env.act('updateCustomer', { customerId: b.id, tags: [p.tag], acceptsMarketing: false, note: `Duplicate of ${a.email} - do not use` });
+      for (const o of env.query('listOrders', { customerId: b.id, status: 'open', fulfillmentStatus: 'unfulfilled' }).items) env.act('updateOrder', { orderId: o.id, email: a.email });
+    },
+    check(final, initial, p) {
+      const c = checker();
+      const a0 = get(initial, 'customers', p.primaryId);
+      const b0 = get(initial, 'customers', p.duplicateId);
+      const a = get(final, 'customers', p.primaryId);
+      const b = get(final, 'customers', p.duplicateId);
+      c.need(sameTagSet(a.tags, [...a0.tags, ...b0.tags]), `primary tags should be ${JSON.stringify([...new Set([...a0.tags, ...b0.tags])])}, are ${JSON.stringify(a.tags)}`);
+      c.need(String(a.note).trim() === `Merged duplicate account ${b0.email}`, 'primary note is wrong');
+      c.need(a.acceptsMarketing === (a0.acceptsMarketing || b0.acceptsMarketing), `primary marketing consent should be ${a0.acceptsMarketing || b0.acceptsMarketing}`);
+      c.need(a.email === a0.email && b.email === b0.email, 'account emails must not change');
+      for (const ad0 of a0.addresses) c.need(JSON.stringify(a.addresses.find((x) => x.id === ad0.id)) === JSON.stringify(ad0), `primary address ${ad0.id} should be unchanged (and stay ${ad0.isDefault ? '' : 'non-'}default)`);
+      const def0 = b0.addresses.find((x) => x.isDefault);
+      const added = a.addresses.filter((x) => !a0.addresses.some((y) => y.id === x.id));
+      c.need(added.length === 1 && sameStr(added[0].address1, def0.address1) && sameStr(added[0].city, def0.city) && String(added[0].zip).trim() === def0.zip && !added[0].isDefault, "primary should get exactly one new non-default address equal to the duplicate's default address");
+      c.need(sameTagSet(b.tags, [p.tag]), `duplicate should be tagged only "${p.tag}"`);
+      c.need(b.acceptsMarketing === false, 'duplicate marketing consent should be off');
+      c.need(String(b.note).trim() === `Duplicate of ${a0.email} - do not use`, 'duplicate note is wrong');
+      c.need(JSON.stringify(b.addresses) === JSON.stringify(b0.addresses), "duplicate's addresses must not change");
+      for (const o0 of initial.orders.filter((o) => o.storeId === p.storeId)) {
+        const o = get(final, 'orders', o0.id);
+        const move = o0.customerId === b0.id && o0.status === 'open' && o0.fulfillmentStatus === 'unfulfilled';
+        if (move) c.need(o.email === a0.email, `${o0.name} email should be ${a0.email}`);
+        else c.need(o.email === o0.email, `${o0.name} email must not change`);
+      }
+      for (const cu0 of initial.customers.filter((x) => x.storeId === p.storeId && x.id !== a0.id && x.id !== b0.id)) c.need(custSig(get(final, 'customers', cu0.id)) === custSig(cu0), `customer ${cu0.email} must not change`);
+      integrity(c, final);
+      return c.reasons;
+    },
+  },
+
+  retail_restock_transfer: {
+    title: 'Top up a retail location from the warehouse with a reserve rule and reorder tags',
+    candidates(s, rng) {
+      const out = [];
+      for (const storeId of rng.shuffle(STORE_IDS)) {
+        const store = get(s, 'stores', storeId);
+        for (const retailId of rng.shuffle(store.locationIds.slice(1))) {
+          const groups = new Set(s.products.filter((x) => x.storeId === storeId && x.status === 'active').map((x) => `${x.vendor}|${x.productType}`));
+          for (const g of rng.shuffle([...groups].sort())) {
+            const [vendor, productType] = g.split('|');
+            const p = { storeId, vendor, productType, warehouseId: store.locationIds[0], retailId, below: 3, target: 6, reserve: 2 };
+            const plan = retailPlan(s, p);
+            if (plan.rows.length < 3 || plan.rows.length > 12 || !plan.rows.some((r) => r.move > 0) || !plan.reorder.size) continue;
+            out.push(p);
+          }
+        }
+      }
+      return out;
+    },
+    prompt(s, p) {
+      return `Top up the shelves at ${locName(s, p.retailId)} in ${storeName(s, p.storeId)} for ${p.vendor} ${p.productType} products. ` +
+        `For every variant of an ACTIVE product with vendor ${p.vendor} and product type ${p.productType} that tracks inventory (inventory policy "deny") and has fewer than ${p.below} units available at ${locName(s, p.retailId)}: ` +
+        `transfer units from ${locName(s, p.warehouseId)} so that the retail location reaches ${p.target}, but never leave the warehouse with fewer than ${p.reserve} units of that variant — if it can't spare enough, transfer only what it can spare (possibly nothing). ` +
+        `Then add the tag "reorder" to every such product that still has at least one of those variants below ${p.target} at ${locName(s, p.retailId)} afterwards. Don't change any other stock and don't tag any other product.`;
+    },
+    solve(env, p) {
+      const plan = retailPlan(env.state, p);
+      for (const r of plan.rows) if (r.move > 0) env.act('transferInventory', { variantId: r.variantId, fromLocationId: p.warehouseId, toLocationId: p.retailId, quantity: r.move });
+      for (const id of plan.reorder) env.act('addTags', { resource: 'product', id, tags: ['reorder'] });
+    },
+    check(final, initial, p) {
+      const c = checker();
+      const plan = retailPlan(initial, p);
+      const byVar = new Map(plan.rows.map((r) => [r.variantId, r]));
+      for (const v0 of initial.variants.filter((v) => v.storeId === p.storeId)) {
+        const r = byVar.get(v0.id);
+        for (const loc of Object.keys(v0.inventory)) {
+          const want = inv(initial, v0.id, loc) + (r ? (loc === p.retailId ? r.move : loc === p.warehouseId ? -r.move : 0) : 0);
+          c.need(inv(final, v0.id, loc) === want, `${v0.sku || v0.id} at ${loc} should be ${want}, is ${inv(final, v0.id, loc)}`);
+        }
+      }
+      for (const pr0 of initial.products.filter((x) => x.storeId === p.storeId)) {
+        const pr = get(final, 'products', pr0.id);
+        if (plan.reorder.has(pr0.id)) c.need(hasTag(pr.tags, 'reorder') && pr0.tags.every((t) => hasTag(pr.tags, t)), `${pr0.title} should be tagged reorder (keeping its other tags)`);
+        else c.need(sameTagSet(pr.tags, pr0.tags), `${pr0.title} (${pr0.id}) tags must not change`);
+      }
+      integrity(c, final);
+      return c.reasons;
+    },
+  },
+
+  winback_campaign: {
+    title: 'Tag lapsed high-value customers and create a matching win-back code',
+    candidates(s, rng) {
+      const out = [];
+      for (const storeId of rng.shuffle(STORE_IDS)) {
+        const stats = [...customerStats(s, storeId).entries()];
+        for (const back of rng.shuffle([45, 60, 75, 90])) {
+          const cutoff = addDays(s.meta.today, -back);
+          for (const thr of [50000, 40000, 30000, 25000, 20000, 15000, 75000, 100000]) {
+            const big = stats.filter(([, x]) => x.totalSpentCents >= thr);
+            const set = big.filter(([, x]) => dateOf(x.lastOrderAt) < cutoff).map(([id]) => id);
+            if (set.length < 3 || set.length > 8 || big.length - set.length < 2) continue;
+            out.push({ storeId, thresholdCents: thr, cutoff, tag: 'winback', code: `COMEBACK${rng.int(10, 99)}`, percent: rng.pick([15, 20]), endsAt: addDays(s.meta.today, 30), customerIds: set });
+            break;
+          }
+        }
+      }
+      return out;
+    },
+    feasible: (s, p) => !findDiscountByCode(s, p.storeId, p.code) && !s.customers.some((x) => hasTag(x.tags, p.tag)),
+    prompt(s, p) {
+      return `Win-back campaign for ${storeName(s, p.storeId)}: find every customer of that store whose lifetime amount spent (payments minus refunds, across all their orders) is at least ${fmtMoney(p.thresholdCents)} and whose most recent order (of any status) was placed before ${p.cutoff}. ` +
+        `Tag each of them "${p.tag}" — nobody else should carry that tag. Then create discount code ${p.code}: ${p.percent}% off the entire order, no minimum, limited to one use per customer, with a total usage limit equal to the number of customers you tagged, active from today through ${p.endsAt}.`;
+    },
+    solve(env, p) {
+      const list = env.query('listCustomers', { storeId: p.storeId, minSpentCents: p.thresholdCents }).items.filter((x) => x.lastOrderAt && x.lastOrderAt.slice(0, 10) < p.cutoff);
+      for (const cu of list) env.act('addTags', { resource: 'customer', id: cu.id, tags: [p.tag] });
+      env.act('createDiscount', { storeId: p.storeId, code: p.code, type: 'percentage', value: p.percent, oncePerCustomer: true, usageLimit: list.length, endsAt: p.endsAt });
+    },
+    check(final, initial, p) {
+      const c = checker();
+      tagOnlyOn(c, initial, final, 'customers', p.tag, new Set(p.customerIds));
+      const d = findDiscountByCode(final, p.storeId, p.code);
+      if (c.need(d, `discount ${p.code} not found in ${p.storeId}`)) {
+        c.need(d.type === 'percentage' && d.value === p.percent && d.scope === 'all', `${p.code} should be ${p.percent}% off the entire order`);
+        c.need(d.minType === 'none', `${p.code} should have no minimum`);
+        c.need(d.oncePerCustomer === true, `${p.code} should be once per customer`);
+        c.need(d.usageLimit === p.customerIds.length, `${p.code} usage limit should be ${p.customerIds.length} (one per tagged customer), is ${d.usageLimit}`);
+        c.need(d.endsAt === p.endsAt && discountStatus(d, final.meta.today) === 'active', `${p.code} should be active today through ${p.endsAt}`);
+      }
+      integrity(c, final);
+      return c.reasons;
+    },
+  },
+
+  pending_payment_cleanup: {
+    title: 'Clean up unpaid orders: cancel expired, remind recent, record one bank transfer',
+    candidates(s, rng) {
+      const out = [];
+      for (const storeId of rng.shuffle(STORE_IDS)) {
+        const pend = s.orders.filter((o) => o.storeId === storeId && o.status === 'open' && o.financialStatus === 'pending');
+        if (pend.length < 4 || pend.length > 14) continue;
+        for (const back of [7, 5, 10, 3, 14]) {
+          const cutoff = addDays(s.meta.today, -back);
+          const old = pend.filter((o) => dateOf(o.createdAt) <= cutoff);
+          const neu = pend.filter((o) => dateOf(o.createdAt) > cutoff);
+          let paid;
+          if (old.length >= 2) paid = rng.pick(old);
+          else if (old.length >= 1 && neu.length >= 3) paid = rng.pick(neu);
+          else continue;
+          if (neu.filter((o) => o !== paid).length < 1) continue;
+          out.push({ storeId, cutoff, tag: 'payment-reminder', paidOrderId: paid.id, cancelIds: old.filter((o) => o !== paid).map((o) => o.id), remindIds: neu.filter((o) => o !== paid).map((o) => o.id) });
+          break;
+        }
+      }
+      return out;
+    },
+    prompt(s, p) {
+      const o = get(s, 'orders', p.paidOrderId);
+      return `Clean up unpaid orders in ${storeName(s, p.storeId)}. For every open order whose payment status is "pending": ` +
+        `(a) if it was placed on or before ${p.cutoff}, the invoice has expired — cancel the order with reason "declined" and put its items back in stock; ` +
+        `(b) if it was placed after ${p.cutoff}, add the tag "${p.tag}". ` +
+        `Exception: ${custLabel(s, o.customerId)} has just paid the full ${fmtMoney(o.totalCents)} for order ${orderLabel(s, o)} by bank transfer — record that payment with gateway "bank_transfer" instead, and neither cancel nor tag that order. Leave every other order alone.`;
+    },
+    solve(env, p) {
+      for (const o of env.query('listOrders', { storeId: p.storeId, status: 'open', financialStatus: 'pending' }).items) {
+        if (o.id === p.paidOrderId) env.act('markOrderPaid', { orderId: o.id, gateway: 'bank_transfer' });
+        else if (dateOf(o.createdAt) <= p.cutoff) env.act('cancelOrder', { orderId: o.id, reason: 'declined', restock: true });
+        else env.act('addTags', { resource: 'order', id: o.id, tags: [p.tag] });
+      }
+    },
+    check(final, initial, p) {
+      const c = checker();
+      const cancel = new Set(p.cancelIds);
+      const remind = new Set(p.remindIds);
+      const expect = new Map();
+      for (const o0 of initial.orders.filter((x) => x.storeId === p.storeId)) {
+        const o = get(final, 'orders', o0.id);
+        if (cancel.has(o0.id)) {
+          c.need(o.status === 'cancelled' && o.cancelReason === 'declined', `${o0.name} should be cancelled with reason declined (is ${o.status}/${o.cancelReason})`);
+          for (const li of o0.lineItems) addDelta(expect, `${li.variantId}|${o0.locationId}`, fulfillableQty(li));
+        } else if (remind.has(o0.id)) {
+          c.need(o.status === 'open' && o.financialStatus === 'pending', `${o0.name} should stay open and pending`);
+          c.need(hasTag(o.tags, p.tag), `${o0.name} should be tagged ${p.tag}`);
+        } else if (o0.id === p.paidOrderId) {
+          c.need(o.status === 'open' && o.financialStatus === 'paid', `${o0.name} should be open and paid, is ${o.status}/${o.financialStatus}`);
+          c.need(!hasTag(o.tags, p.tag), `${o0.name} should not be tagged ${p.tag}`);
+          const txs = created(initial, final, 'transactions').filter((t) => t.orderId === o0.id && t.kind === 'sale');
+          c.need(sumBy(txs, (t) => t.amountCents) === o0.totalCents && txs.every((t) => sameStr(t.gateway, 'bank_transfer')), `${o0.name} payment of ${fmtMoney(o0.totalCents)} should be recorded with gateway bank_transfer`);
+        } else c.need(orderSig(o) === orderSig(o0), `${o0.name} (${o0.id}) must not change`);
+      }
+      stockDeltaCheck(c, initial, final, expect, 'restock');
       integrity(c, final);
       return c.reasons;
     },

@@ -480,5 +480,250 @@
       "tag": "priority",
       "note": "Ship before 2026-06-17 - customer travelling"
     }
+  },
+  {
+    "id": "t33-damaged-item-complaint",
+    "kind": "complaint_refund_coupon",
+    "title": "Resolve a damaged-item complaint: partial refund, apology code, tags and note",
+    "tags": [
+      "hard"
+    ],
+    "seed": 201,
+    "prompt": "Elena Kaur (elena.kaur2@example.com, CUS-01732) emailed about order #1334 (ORD-001479) in Ridgeway Trail Supply (STO-3): one unit of \"Mesa Camp Lantern\" (Yellow) arrived damaged and they have thrown it away. Please resolve it: (1) refund that one unit — its item price and tax only, no shipping — with refund reason \"damaged\" and without restocking it; (2) create a discount code SORRY143 in that store for 25% off the entire order, no minimum, usable only once in total (usage limit 1), active from today through 2026-07-15; (3) tag the customer \"service-recovery\"; (4) tag the order \"complaint\" and set its note to exactly \"Damaged RW-044-YEL: refunded 1 unit, sent code SORRY143\". Do not refund or change anything else on this order or on the customer's other orders.",
+    "params": {
+      "storeId": "STO-3",
+      "orderId": "ORD-001479",
+      "lineItemId": "LI-002582",
+      "customerId": "CUS-01732",
+      "code": "SORRY143",
+      "percent": 25,
+      "endsAt": "2026-07-15",
+      "customerTag": "service-recovery",
+      "orderTag": "complaint",
+      "note": "Damaged RW-044-YEL: refunded 1 unit, sent code SORRY143"
+    }
+  },
+  {
+    "id": "t34-return-queue-policy",
+    "kind": "process_return_queue",
+    "title": "Process all pending return requests of a store under a return-window policy",
+    "tags": [
+      "hard"
+    ],
+    "seed": 202,
+    "prompt": "Work through every return request waiting for review (status \"requested\") in Ridgeway Trail Supply (STO-3) and apply our return policy to each: (a) if the order was placed on or before 2026-05-28 (18 or more days ago), decline the request with the note \"Outside the 18-day return window\"; (b) otherwise approve it and refund the returned items (not shipping) so that the return ends up closed; restock the returned units at the order's assigned location, except when the return reason is \"defective\" — those are refunded without restocking. Do not touch returns in other stores or returns that are not in \"requested\" status.",
+    "params": {
+      "storeId": "STO-3",
+      "days": 18,
+      "cutoff": "2026-05-28",
+      "note": "Outside the 18-day return window",
+      "declineIds": [
+        "RET-0090"
+      ],
+      "approveIds": [
+        "RET-0117",
+        "RET-0122",
+        "RET-0137"
+      ]
+    }
+  },
+  {
+    "id": "t35-replace-broken-item",
+    "kind": "replace_damaged_item",
+    "title": "Replace a broken item: refund, stock transfer, replacement order and shipment",
+    "tags": [
+      "hard"
+    ],
+    "seed": 203,
+    "prompt": "Bodhi Yilmaz (bodhi.yilmaz@example.com, CUS-00116) reports that one unit of Alder Pocket Tee — L / Black (SKU FH-083-L-BLA) from order #1236 (ORD-000542) in Fernhollow Apparel (STO-1) arrived damaged beyond use; nothing will be sent back. Handle it like this: (1) on the original order, refund that one unit (item price and tax, no shipping) with reason \"damaged\", without restocking; (2) the replacement must ship from Portland Warehouse (LOC-01): if that location has no available stock of SKU FH-083-L-BLA, first transfer exactly 2 units of it there from whichever other location of the store currently holds the most; (3) create a new admin order for the same customer with 1 unit of SKU FH-083-L-BLA, standard shipping to their default address, fulfilled from Portland Warehouse (LOC-01), payment status paid (they paid for the replacement by phone), tagged \"replacement\" and with the note \"Replacement for #1236\"; (4) fulfill the new order immediately with FedEx tracking number 796205403210. Leave the other items on the original order alone.",
+    "params": {
+      "storeId": "STO-1",
+      "orderId": "ORD-000542",
+      "lineItemId": "LI-000932",
+      "customerId": "CUS-00116",
+      "variantId": "VAR-00550",
+      "shipFromId": "LOC-01",
+      "sourceId": "LOC-02",
+      "transferQty": 2,
+      "tag": "replacement",
+      "note": "Replacement for #1236",
+      "carrier": "FedEx",
+      "trackingNumber": "796205403210"
+    }
+  },
+  {
+    "id": "t36-vendor-season-markdown",
+    "kind": "vendor_markdown",
+    "title": "End-of-season markdown with compare-at prices, a collection and a discount",
+    "tags": [
+      "hard"
+    ],
+    "seed": 204,
+    "prompt": "End-of-season markdown for Bluebird Gear Lighting products in Ridgeway Trail Supply (STO-3). For every ACTIVE product with vendor Bluebird Gear and product type Lighting that is not already on sale (none of its variants has a compare-at price): on each of its variants set the compare-at price to the current price and lower the price by 30% (rounded to the nearest cent). Leave draft/archived products and products already on sale exactly as they are. Then create a manual collection titled \"Bluebird Gear Lighting Clearance\" containing exactly the products you marked down, and a discount code CLEAR86 giving an extra 15% off that applies only to that collection, no minimum, active from today through 2026-06-29.",
+    "params": {
+      "storeId": "STO-3",
+      "vendor": "Bluebird Gear",
+      "productType": "Lighting",
+      "percent": 30,
+      "title": "Bluebird Gear Lighting Clearance",
+      "code": "CLEAR86",
+      "extra": 15,
+      "endsAt": "2026-06-29",
+      "productIds": [
+        "PRD-0286",
+        "PRD-0293"
+      ],
+      "distractors": 1
+    }
+  },
+  {
+    "id": "t37-count-sheet-net-pending",
+    "kind": "count_sheet_committed",
+    "title": "Apply a physical count sheet, netting out units waiting to ship",
+    "tags": [
+      "hard"
+    ],
+    "seed": 205,
+    "prompt": "We just did a physical stock count at Boulder Retail (LOC-07) in Ridgeway Trail Supply (STO-3). Count sheet — units physically on the shelf: SKU RW-030-LON: 22; SKU RW-036-2P: 1; SKU RW-048-18L-TEA: 22; SKU RW-052-28L-ORA: 13. Units that belong to orders assigned to this location but not shipped yet are still on the shelf, yet they were already deducted from \"available\" when the orders were placed. So for each SKU on the sheet, set its available quantity at Boulder Retail (LOC-07) to the counted number minus the units still waiting to ship from this location (ordered but not yet fulfilled on non-cancelled orders, not counting refunded or removed units). Record the changes as cycle-count adjustments. Do not fulfill or edit any orders and do not change stock at other locations or for other SKUs.",
+    "params": {
+      "storeId": "STO-3",
+      "locationId": "LOC-07",
+      "rows": [
+        {
+          "variantId": "VAR-01192",
+          "sku": "RW-030-LON",
+          "counted": 22,
+          "expected": 19
+        },
+        {
+          "variantId": "VAR-01203",
+          "sku": "RW-036-2P",
+          "counted": 1,
+          "expected": 0
+        },
+        {
+          "variantId": "VAR-01247",
+          "sku": "RW-048-18L-TEA",
+          "counted": 22,
+          "expected": 22
+        },
+        {
+          "variantId": "VAR-01272",
+          "sku": "RW-052-28L-ORA",
+          "counted": 13,
+          "expected": 13
+        }
+      ]
+    }
+  },
+  {
+    "id": "t38-express-shipping-batch",
+    "kind": "fulfill_express_batch",
+    "title": "Ship all paid express orders from a date window with carrier rules",
+    "tags": [
+      "hard"
+    ],
+    "seed": 206,
+    "prompt": "Express shipping run for Fernhollow Apparel (STO-1): fulfill every open order placed between 2026-06-13 and 2026-06-15 (inclusive) that uses express shipping, is fully paid (payment status \"paid\") and has nothing shipped yet. Ship each such order completely in a single fulfillment. Carrier: UPS for orders whose total is $150.00 or more, USPS for the others. Tracking number: \"EX\" followed by the order number (for example order #1234 gets EX1234). Do not fulfill any other order.",
+    "params": {
+      "storeId": "STO-1",
+      "from": "2026-06-13",
+      "to": "2026-06-15",
+      "thresholdCents": 15000,
+      "orderIds": [
+        "ORD-004181",
+        "ORD-004182",
+        "ORD-004188"
+      ]
+    }
+  },
+  {
+    "id": "t39-merge-duplicate-customer",
+    "kind": "merge_duplicate_customers",
+    "title": "Consolidate a duplicate customer record into the original",
+    "tags": [
+      "hard"
+    ],
+    "seed": 207,
+    "prompt": "Rafael Varga in Fernhollow Apparel (STO-1) has two customer accounts, rafael.varga3@example.com and rafael.varga@example.com, and asked us to consolidate them. The account that was created first is the one to keep (the primary); the other is the duplicate. On the primary: add every tag the duplicate has (keep its own tags), add the duplicate's default address as an additional, non-default address (the primary's default address must stay the same), turn on marketing consent if either account had it (otherwise leave it off), and set its note to \"Merged duplicate account <duplicate's email>\". On the duplicate: replace all of its tags with just \"merged-duplicate\", turn marketing consent off, and set its note to \"Duplicate of <primary's email> - do not use\". Finally, change the contact email to the primary's email on every order of the duplicate that is still open and unfulfilled. Do not change either account's own email address or the duplicate's addresses, and do not touch any other customer or order.",
+    "params": {
+      "storeId": "STO-1",
+      "primaryId": "CUS-00062",
+      "duplicateId": "CUS-00449",
+      "tag": "merged-duplicate",
+      "primaryNote": "Merged duplicate account rafael.varga3@example.com",
+      "duplicateNote": "Duplicate of rafael.varga@example.com - do not use",
+      "score": 8
+    }
+  },
+  {
+    "id": "t40-retail-topup-transfers",
+    "kind": "retail_restock_transfer",
+    "title": "Top up a retail location from the warehouse with a reserve rule and reorder tags",
+    "tags": [
+      "hard"
+    ],
+    "seed": 208,
+    "prompt": "Top up the shelves at Reno Fulfillment Center (LOC-06) in Ridgeway Trail Supply (STO-3) for Ridgeway Backpack products. For every variant of an ACTIVE product with vendor Ridgeway and product type Backpack that tracks inventory (inventory policy \"deny\") and has fewer than 3 units available at Reno Fulfillment Center (LOC-06): transfer units from Denver Fulfillment Center (LOC-05) so that the retail location reaches 6, but never leave the warehouse with fewer than 2 units of that variant — if it can't spare enough, transfer only what it can spare (possibly nothing). Then add the tag \"reorder\" to every such product that still has at least one of those variants below 6 at Reno Fulfillment Center (LOC-06) afterwards. Don't change any other stock and don't tag any other product.",
+    "params": {
+      "storeId": "STO-3",
+      "vendor": "Ridgeway",
+      "productType": "Backpack",
+      "warehouseId": "LOC-05",
+      "retailId": "LOC-06",
+      "below": 3,
+      "target": 6,
+      "reserve": 2
+    }
+  },
+  {
+    "id": "t41-winback-campaign",
+    "kind": "winback_campaign",
+    "title": "Tag lapsed high-value customers and create a matching win-back code",
+    "tags": [
+      "hard"
+    ],
+    "seed": 209,
+    "prompt": "Win-back campaign for Saltbox Home Goods (STO-2): find every customer of that store whose lifetime amount spent (payments minus refunds, across all their orders) is at least $500.00 and whose most recent order (of any status) was placed before 2026-04-01. Tag each of them \"winback\" — nobody else should carry that tag. Then create discount code COMEBACK45: 15% off the entire order, no minimum, limited to one use per customer, with a total usage limit equal to the number of customers you tagged, active from today through 2026-07-15.",
+    "params": {
+      "storeId": "STO-2",
+      "thresholdCents": 50000,
+      "cutoff": "2026-04-01",
+      "tag": "winback",
+      "code": "COMEBACK45",
+      "percent": 15,
+      "endsAt": "2026-07-15",
+      "customerIds": [
+        "CUS-01485",
+        "CUS-01177",
+        "CUS-01029"
+      ]
+    }
+  },
+  {
+    "id": "t42-unpaid-orders-cleanup",
+    "kind": "pending_payment_cleanup",
+    "title": "Clean up unpaid orders: cancel expired, remind recent, record one bank transfer",
+    "tags": [
+      "hard"
+    ],
+    "seed": 210,
+    "prompt": "Clean up unpaid orders in Saltbox Home Goods (STO-2). For every open order whose payment status is \"pending\": (a) if it was placed on or before 2026-06-08, the invoice has expired — cancel the order with reason \"declined\" and put its items back in stock; (b) if it was placed after 2026-06-08, add the tag \"payment-reminder\". Exception: Arlo Xiong (arlo.xiong@example.com, CUS-01268) has just paid the full $261.05 for order #2183 (ORD-003861) in Saltbox Home Goods (STO-2) by bank transfer — record that payment with gateway \"bank_transfer\" instead, and neither cancel nor tag that order. Leave every other order alone.",
+    "params": {
+      "storeId": "STO-2",
+      "cutoff": "2026-06-08",
+      "tag": "payment-reminder",
+      "paidOrderId": "ORD-003861",
+      "cancelIds": [
+        "ORD-003418"
+      ],
+      "remindIds": [
+        "ORD-004012",
+        "ORD-004139",
+        "ORD-004148",
+        "ORD-004153",
+        "ORD-004186"
+      ]
+    }
   }
 ]

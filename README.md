@@ -213,7 +213,7 @@ engine.reset();
 
 ## Tasks
 
-`tasks/tasks.json` holds 32 tasks. Each has an `id`, `kind`, `title`, `seed`, natural-language `prompt` and hidden `params`. `tasks/kinds.js` defines each kind's `candidates` (how concrete entities are picked from the seeded world), `prompt`, reference solution `solve(env, params)` and checker `check(final, initial, params)`.
+`tasks/tasks.json` holds 42 tasks: the 32 original single-workflow tasks (`t01`-`t32`) plus 10 harder multi-step tasks (`t33`-`t42`) tagged `"hard"` (`tags: ["hard"]` in the task JSON). Each has an `id`, `kind`, `title`, `seed`, natural-language `prompt` and hidden `params`. `tasks/kinds.js` defines each kind's `candidates` (how concrete entities are picked from the seeded world), `prompt`, reference solution `solve(env, params)` and checker `check(final, initial, params)`.
 
 | ID | What the agent must do |
 |---|---|
@@ -249,6 +249,20 @@ engine.reset();
 | `t30-restock-low-inventory` | Top up low stock for one vendor at one location |
 | `t31-tag-top-seller` | Tag the best-selling product (analytics) |
 | `t32-flag-priority-order` | Tag an order and add a note |
+| `t33-damaged-item-complaint` | **hard** Complaint: refund one damaged unit (no restock), create a one-use apology code, tag customer and order, set order note |
+| `t34-return-queue-policy` | **hard** Process every requested return in a store: decline those outside the return window (with note), approve + refund the rest, restocking unless the reason is defective |
+| `t35-replace-broken-item` | **hard** Refund a broken unit, transfer stock to the shipping warehouse if it has none, create a paid replacement order there and fulfill it with tracking |
+| `t36-vendor-season-markdown` | **hard** Mark down a vendor's active, not-yet-on-sale products of one type (compare-at prices), put them in a new manual collection and add a collection-scoped code |
+| `t37-count-sheet-net-pending` | **hard** Apply a count sheet, subtracting units still waiting to ship from that location |
+| `t38-express-shipping-batch` | **hard** Fulfill all paid, unshipped express orders from a date window, carrier chosen by order total, tracking derived from the order number |
+| `t39-merge-duplicate-customer` | **hard** Consolidate a duplicate customer into the older account (tags, address, consent, notes, open order emails) |
+| `t40-retail-topup-transfers` | **hard** Top up a retail location from the warehouse with a reserve rule; tag products that are still short "reorder" |
+| `t41-winback-campaign` | **hard** Tag lapsed high-spending customers and create a once-per-customer code limited to that many uses |
+| `t42-unpaid-orders-cleanup` | **hard** Pending-payment orders: cancel expired ones (restock), tag recent ones for a reminder, record one bank transfer |
+
+Hard tasks typically need 4-12 mutating actions plus several lookups (the reference solutions use 3-19 depending on the world), and include distractors (similar orders, returns, products or customers that must not change), which the checkers verify.
+
+Every task can also be instantiated in another seeded world: `POST /api/tasks/:id/start` accepts an optional JSON body `{"seed": N}`, which re-picks the task's entities in the world generated from seed `N` (in code: `instantiateTask(id, seed)` from `tasks/generate.js`). Every task, hard ones included, has a feasible instance on seeds 1, 2 and 3.
 
 ```bash
 npm run tasks:verify            # all tasks; exits 1 if any checker passes on seed or fails after its reference solution

@@ -8,6 +8,9 @@ const tasks = loadTasks();
 
 test('there are ~30 well-formed tasks', () => {
   assert.ok(tasks.length >= 30);
+  assert.equal(tasks.length, 42);
+  assert.equal(tasks.filter((t) => !(t.tags || []).includes('hard')).length, 32, 'the 32 original tasks are untagged');
+  assert.equal(tasks.filter((t) => (t.tags || []).includes('hard')).length, 10);
   assert.equal(new Set(tasks.map((t) => t.id)).size, tasks.length);
   for (const t of tasks) {
     assert.equal(typeof t.id, 'string');

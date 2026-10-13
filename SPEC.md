@@ -132,7 +132,7 @@ For a store and an inclusive date range (default: the last 30 days):
 ## 4. Agent layer
 
 * One action registry (`core/actions.js`) and one query registry (`core/queries.js`) back the SPA, `window.cartwright`, the REST server and the task harness, which all behave identically.
-* Tasks: `tasks/kinds.js` defines, per kind, `candidates(state, rng, variant)`, `prompt(state, params)`, `solve(env, params)` and `check(final, initial, params) → reasons[]`. `tasks/specs.js` lists the 32 tasks (kind + seed). `tasks/generate.js` deterministically picks, for each task, the first candidate that is feasible, fails the checker on the seed, and passes after the reference solution. `tasks/run.js` re-verifies all of them and exits non-zero on any failure.
+* Tasks: `tasks/kinds.js` defines, per kind, `candidates(state, rng, variant)`, `prompt(state, params)`, `solve(env, params)` and `check(final, initial, params) → reasons[]`. `tasks/specs.js` lists the 42 tasks (kind + seed; the last 10 are tagged `hard`). `tasks/generate.js` deterministically picks, for each task, the first candidate that is feasible, fails the checker on the seed, and passes after the reference solution. `tasks/run.js` re-verifies all of them and exits non-zero on any failure.
 
 ---
 
