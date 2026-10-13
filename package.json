@@ -1,0 +1,22 @@
+{
+  "name": "cartwright",
+  "version": "1.0.0",
+  "description": "Cartwright: a clean-room, deterministic e-commerce merchant-admin simulator (products, inventory, orders, fulfillment, refunds, discounts, storefront) for agent RL environments and evals.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "build": "node scripts/sync-core.js",
+    "tasks:generate": "node tasks/generate.js",
+    "tasks:verify": "node tasks/run.js",
+    "serve:docs": "node scripts/serve-docs.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

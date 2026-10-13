@@ -1,0 +1,484 @@
+[
+  {
+    "id": "t01-fulfill-with-tracking",
+    "kind": "fulfill_tracking",
+    "title": "Fulfill a paid order with tracking",
+    "seed": 101,
+    "prompt": "Order #1895 (ORD-004174) in Ridgeway Trail Supply (STO-3) for Leah Chowdhury (leah.chowdhury@example.com, CUS-01547) is paid and ready to ship. Fulfill every item on it in a single shipment with FedEx tracking number 227631226275.",
+    "params": {
+      "orderId": "ORD-004174",
+      "carrier": "FedEx",
+      "trackingNumber": "227631226275"
+    }
+  },
+  {
+    "id": "t02-partial-fulfillment",
+    "kind": "partial_fulfill",
+    "title": "Ship only one line item of an order",
+    "seed": 102,
+    "prompt": "For order #1053 (ORD-000195) in Saltbox Home Goods (STO-2), only Clover Salad Servers — Default Title (SKU SB-031) is ready to go out. Create a fulfillment for just that line item (all 1 unit(s)) with USPS tracking number 9400779634093988088471. Leave every other item on the order unfulfilled.",
+    "params": {
+      "orderId": "ORD-000195",
+      "lineItemId": "LI-000326",
+      "carrier": "USPS",
+      "trackingNumber": "9400779634093988088471"
+    }
+  },
+  {
+    "id": "t03-refund-and-restock",
+    "kind": "refund_item",
+    "title": "Refund one unit of an order line (with or without restock)",
+    "seed": 103,
+    "prompt": "The customer sent back one unit of Alder Crew Tee — XL / Heather Grey (SKU FH-024-XL-HEA) from order #2577 (ORD-003346) in Fernhollow Apparel (STO-1) in resalable condition. Refund that one unit (do not refund shipping) and restock it at Portland Warehouse (LOC-01).",
+    "params": {
+      "orderId": "ORD-003346",
+      "lineItemId": "LI-005824",
+      "restock": true,
+      "locationId": "LOC-01"
+    }
+  },
+  {
+    "id": "t04-refund-damaged-no-restock",
+    "kind": "refund_item",
+    "title": "Refund one unit of an order line (with or without restock)",
+    "seed": 104,
+    "prompt": "One unit of Willow Wool Scarf — Black (SKU FH-110-BLA) on order #2912 (ORD-004017) in Fernhollow Apparel (STO-1) arrived damaged and the customer will not send it back. Refund that one unit (do not refund shipping) without restocking it.",
+    "params": {
+      "orderId": "ORD-004017",
+      "lineItemId": "LI-006949",
+      "restock": false,
+      "locationId": "LOC-01"
+    }
+  },
+  {
+    "id": "t05-cancel-order",
+    "kind": "cancel_order",
+    "title": "Cancel an order, refund and restock",
+    "seed": 105,
+    "prompt": "Ravi Nakamura (ravi.nakamura2@example.com, CUS-00102) asked to cancel order #2274 (ORD-002708) in Fernhollow Apparel (STO-1) before it ships. Cancel the order with reason \"customer\", refund the full payment, and restock all items.",
+    "params": {
+      "orderId": "ORD-002708"
+    }
+  },
+  {
+    "id": "t06-mark-order-paid",
+    "kind": "mark_paid",
+    "title": "Record a manual payment on a pending order",
+    "seed": 106,
+    "prompt": "Omar Brennan (omar.brennan@example.com, CUS-00357) paid the full $63.90 for order #2958 (ORD-004113) in Fernhollow Apparel (STO-1) by bank transfer. Mark the order as paid.",
+    "params": {
+      "orderId": "ORD-004113"
+    }
+  },
+  {
+    "id": "t07-capture-authorized",
+    "kind": "capture_all_authorized",
+    "title": "Capture every authorized payment in a store",
+    "seed": 107,
+    "prompt": "Card payments in Saltbox Home Goods (STO-2) are only authorized at checkout. Capture the full payment on every open order in that store whose payment is authorized but not yet captured. Do not touch orders in other stores.",
+    "params": {
+      "storeId": "STO-2",
+      "orderIds": [
+        "ORD-004018",
+        "ORD-004034",
+        "ORD-004073",
+        "ORD-004087",
+        "ORD-004108",
+        "ORD-004131",
+        "ORD-004140",
+        "ORD-004187"
+      ]
+    }
+  },
+  {
+    "id": "t08-approve-return-refund",
+    "kind": "approve_return_refund",
+    "title": "Approve a return request, refund and restock",
+    "seed": 108,
+    "prompt": "Return request RET-0117 on order #2807 (ORD-003820) in Fernhollow Apparel (STO-1) (1 x Harbor Jogger — 32 / Khaki (SKU FH-011-32-KHA), reason wrong_item) has been accepted and the item came back in good condition. Approve the return, refund the returned item (not shipping) and restock it at Portland Warehouse (LOC-01).",
+    "params": {
+      "returnId": "RET-0117",
+      "locationId": "LOC-01"
+    }
+  },
+  {
+    "id": "t09-decline-return",
+    "kind": "decline_return",
+    "title": "Decline a return request",
+    "seed": 109,
+    "prompt": "The item in return request RET-0133 (order #1846 (ORD-003906) in Ridgeway Trail Supply (STO-3)) was bought as final sale. Decline the return request; do not issue any refund.",
+    "params": {
+      "returnId": "RET-0133"
+    }
+  },
+  {
+    "id": "t10-percentage-discount",
+    "kind": "create_percentage_discount",
+    "title": "Create a percentage discount code with requirements and limits",
+    "seed": 110,
+    "prompt": "In Fernhollow Apparel (STO-1), create discount code SUMMER76: 15% off the entire order, minimum purchase $75.00, limited to 250 total uses and one use per customer, active from today (2026-06-15) through 2026-07-15.",
+    "params": {
+      "storeId": "STO-1",
+      "code": "SUMMER76",
+      "percent": 15,
+      "minSubtotalCents": 7500,
+      "usageLimit": 250,
+      "endsAt": "2026-07-15"
+    }
+  },
+  {
+    "id": "t11-free-shipping-discount",
+    "kind": "create_free_shipping",
+    "title": "Create a scheduled free-shipping code with a minimum quantity",
+    "seed": 111,
+    "prompt": "Set up a free-shipping promotion in Ridgeway Trail Supply (STO-3): code SHIPWEEK36 gives free shipping on orders with at least 2 items. It should run from 2026-06-20 through 2026-06-26 (inclusive), with no usage limit.",
+    "params": {
+      "storeId": "STO-3",
+      "code": "SHIPWEEK36",
+      "minQty": 2,
+      "startsAt": "2026-06-20",
+      "endsAt": "2026-06-26"
+    }
+  },
+  {
+    "id": "t12-collection-discount",
+    "kind": "create_collection_discount",
+    "title": "Create a fixed-amount discount for one collection",
+    "seed": 112,
+    "prompt": "In Saltbox Home Goods (STO-2), create discount code COLLECT34 worth $10.00 off, applying only to products in the \"Gift Guide\" collection (COL-011). No minimum purchase, no usage limit, starting today.",
+    "params": {
+      "storeId": "STO-2",
+      "collectionId": "COL-011",
+      "code": "COLLECT34",
+      "amountCents": 1000
+    }
+  },
+  {
+    "id": "t13-disable-leaked-code",
+    "kind": "deactivate_code",
+    "title": "Disable a leaked discount code",
+    "seed": 113,
+    "prompt": "The code VIP25 for Fernhollow Apparel (STO-1) was posted on a public coupon site. Disable it immediately so it can no longer be used (keep it on record; don't change any other discount).",
+    "params": {
+      "storeId": "STO-1",
+      "discountId": "DSC-005"
+    }
+  },
+  {
+    "id": "t14-create-product-variants",
+    "kind": "create_product_variants",
+    "title": "Create a product with size x color variants, SKUs and stock",
+    "seed": 114,
+    "prompt": "Add a new product to Fernhollow Apparel (STO-1): \"Lantern Bay Overshirt\", vendor Fernhollow, product type Shirt, status active. It has two options: Size (M, L, XL) and Color (Olive, Natural), with one variant for every combination, each priced $48.00. Give each variant the SKU LBO9-<SIZE>-<COLOR in upper case> (e.g. LBO9-M-OLIVE) and stock 12 units of every variant at Portland Warehouse (LOC-01).",
+    "params": {
+      "storeId": "STO-1",
+      "title": "Lantern Bay Overshirt",
+      "vendor": "Fernhollow",
+      "productType": "Shirt",
+      "sizes": [
+        "M",
+        "L",
+        "XL"
+      ],
+      "colors": [
+        "Olive",
+        "Natural"
+      ],
+      "priceCents": 4800,
+      "skuPrefix": "LBO9",
+      "locationId": "LOC-01",
+      "quantity": 12
+    }
+  },
+  {
+    "id": "t15-put-product-on-sale",
+    "kind": "put_on_sale",
+    "title": "Put a product on sale using compare-at prices",
+    "seed": 115,
+    "prompt": "Put \"Timberline Headlamp\" (PRD-0298) in Ridgeway Trail Supply (STO-3) on sale: for every variant, set the compare-at price to the variant's current price and lower the price by 20% (rounded to the nearest cent).",
+    "params": {
+      "productId": "PRD-0298",
+      "percent": 20
+    }
+  },
+  {
+    "id": "t16-receive-inventory",
+    "kind": "receive_inventory",
+    "title": "Receive a stock delivery",
+    "seed": 116,
+    "prompt": "A supplier delivery of 36 units of Alder Zip Hoodie — XL / Forest (SKU FH-080-XL-FOR, VAR-00569) arrived at Portland Warehouse (LOC-01). Add them to available inventory there, recording the adjustment with reason \"received\".",
+    "params": {
+      "variantId": "VAR-00569",
+      "locationId": "LOC-01",
+      "quantity": 36
+    }
+  },
+  {
+    "id": "t17-transfer-stock",
+    "kind": "transfer_stock",
+    "title": "Transfer stock between locations",
+    "seed": 117,
+    "prompt": "Move 5 units of Basalt Slub Tee — M / Black (SKU FH-081-M-BLA, VAR-00553) from Portland Warehouse (LOC-01) to Pearl District Store (LOC-02).",
+    "params": {
+      "variantId": "VAR-00553",
+      "fromLocationId": "LOC-01",
+      "toLocationId": "LOC-02",
+      "quantity": 5
+    }
+  },
+  {
+    "id": "t18-cycle-count",
+    "kind": "cycle_count",
+    "title": "Apply cycle-count results",
+    "seed": 118,
+    "prompt": "A cycle count at Portland Warehouse (LOC-01) (Fernhollow Apparel (STO-1)) found these on-hand quantities: SKU FH-093-L-CHA: 41; SKU FH-093-M-CHA: 52; SKU FH-070-NAV: 3. Set the available inventory at that location to the counted numbers.",
+    "params": {
+      "storeId": "STO-1",
+      "locationId": "LOC-01",
+      "counts": [
+        {
+          "variantId": "VAR-00639",
+          "sku": "FH-093-L-CHA",
+          "quantity": 41
+        },
+        {
+          "variantId": "VAR-00635",
+          "sku": "FH-093-M-CHA",
+          "quantity": 52
+        },
+        {
+          "variantId": "VAR-00447",
+          "sku": "FH-070-NAV",
+          "quantity": 3
+        }
+      ]
+    }
+  },
+  {
+    "id": "t19-smart-collection",
+    "kind": "smart_collection",
+    "title": "Create an automated (smart) collection",
+    "seed": 119,
+    "prompt": "In Ridgeway Trail Supply (STO-3), create an automated (smart) collection titled \"Ridgeway Hydration Edit\" that automatically includes every product whose vendor is Ridgeway AND whose product type is Hydration.",
+    "params": {
+      "storeId": "STO-3",
+      "vendor": "Ridgeway",
+      "productType": "Hydration",
+      "title": "Ridgeway Hydration Edit"
+    }
+  },
+  {
+    "id": "t20-manual-collection-add",
+    "kind": "manual_collection_add",
+    "title": "Add products to a manual collection",
+    "seed": 120,
+    "prompt": "Add these products to the \"Gift Guide\" collection (COL-020) in Ridgeway Trail Supply (STO-3), keeping everything already in it: \"Basecamp Trail Pack\" (PRD-0295), \"Basecamp Daypack\" (PRD-0243), \"Mesa Headlamp\" (PRD-0294).",
+    "params": {
+      "collectionId": "COL-020",
+      "productIds": [
+        "PRD-0295",
+        "PRD-0243",
+        "PRD-0294"
+      ]
+    }
+  },
+  {
+    "id": "t21-archive-product-line",
+    "kind": "archive_vendor_type",
+    "title": "Archive a discontinued product line",
+    "seed": 121,
+    "prompt": "Saltbox has discontinued its Kitchen line. In Saltbox Home Goods (STO-2), archive every Saltbox product with product type Kitchen. Leave all other products as they are.",
+    "params": {
+      "storeId": "STO-2",
+      "vendor": "Saltbox",
+      "productType": "Kitchen"
+    }
+  },
+  {
+    "id": "t22-tag-vip-customers",
+    "kind": "tag_vip_customers",
+    "title": "Tag high-spending customers",
+    "seed": 122,
+    "prompt": "In Saltbox Home Goods (STO-2), add the tag \"VIP\" to every customer whose total amount spent (payments minus refunds, over all their orders) is at least $2,200.00. No other customer should have that tag.",
+    "params": {
+      "storeId": "STO-2",
+      "thresholdCents": 220000,
+      "tag": "VIP"
+    }
+  },
+  {
+    "id": "t23-customer-new-address",
+    "kind": "update_default_address",
+    "title": "Change a customer's default address",
+    "seed": 123,
+    "prompt": "Customer Silas Novak (silas.novak@example.com, CUS-01043) moved. Add their new address — 107 Harbor View Rd, Bend, OR 97701, US — and make it their default address. Keep the old address on file.",
+    "params": {
+      "customerId": "CUS-01043",
+      "address1": "107 Harbor View Rd",
+      "city": "Bend",
+      "province": "OR",
+      "zip": "97701"
+    }
+  },
+  {
+    "id": "t24-create-customer",
+    "kind": "create_customer",
+    "title": "Create a customer record",
+    "seed": 124,
+    "prompt": "Create a customer in Ridgeway Trail Supply (STO-3): Ingrid Solheim, email ingrid.solheim@example.net, phone +15555587810, tagged \"wholesale\", who has agreed to receive marketing emails, with default address 723 Canal St, Albany, NY 12207, US.",
+    "params": {
+      "storeId": "STO-3",
+      "firstName": "Ingrid",
+      "lastName": "Solheim",
+      "email": "ingrid.solheim@example.net",
+      "phone": "+15555587810",
+      "tag": "wholesale",
+      "address1": "723 Canal St",
+      "city": "Albany",
+      "province": "NY",
+      "zip": "12207"
+    }
+  },
+  {
+    "id": "t25-storefront-checkout",
+    "kind": "storefront_checkout",
+    "title": "Place an order through the storefront with a discount code",
+    "seed": 125,
+    "prompt": "Acting as the shopper Idris Jansen (idris.jansen@example.com, CUS-01251) on the Saltbox Home Goods (STO-2) storefront, use a cart and checkout to buy 2 x Larkspur Cotton Blanket — Rust (SKU SB-042-RUS, VAR-00926), 1 x Quarry Waffle Throw — Charcoal (SKU SB-009-CHA, VAR-00829). Apply discount code WELCOME10 and choose standard shipping to the customer's default address.",
+    "params": {
+      "storeId": "STO-2",
+      "customerId": "CUS-01251",
+      "lines": [
+        {
+          "variantId": "VAR-00926",
+          "quantity": 2
+        },
+        {
+          "variantId": "VAR-00829",
+          "quantity": 1
+        }
+      ],
+      "code": "WELCOME10"
+    }
+  },
+  {
+    "id": "t26-manual-wholesale-order",
+    "kind": "manual_order_pending",
+    "title": "Create a manual order with payment pending",
+    "seed": 126,
+    "prompt": "Owen Castillo (owen.castillo@example.com, CUS-00839) phoned in a wholesale order to Fernhollow Apparel (STO-1): 2 x Basalt Chore Coat — M (SKU FH-120-M, VAR-00828), 2 x Granite Crew Tee — L / Black (SKU FH-109-L-BLA, VAR-00751). Create the order from the admin for this customer with standard shipping to their default address, no discount, payment pending (they will pay by invoice), and tag it \"wholesale\".",
+    "params": {
+      "storeId": "STO-1",
+      "customerId": "CUS-00839",
+      "lines": [
+        {
+          "variantId": "VAR-00828",
+          "quantity": 2
+        },
+        {
+          "variantId": "VAR-00751",
+          "quantity": 2
+        }
+      ],
+      "tag": "wholesale"
+    }
+  },
+  {
+    "id": "t27-correct-tracking",
+    "kind": "update_tracking",
+    "title": "Correct the tracking number on a shipment",
+    "seed": 127,
+    "prompt": "The warehouse entered the wrong tracking on shipment FUL-03694 of order #2230 (ORD-003931) in Saltbox Home Goods (STO-2) (currently USPS 9400131875784166807882). It actually shipped with UPS, tracking number 1Z7753314835394479. Correct the tracking on that fulfillment.",
+    "params": {
+      "fulfillmentId": "FUL-03694",
+      "orderId": "ORD-003931",
+      "carrier": "UPS",
+      "trackingNumber": "1Z7753314835394479"
+    }
+  },
+  {
+    "id": "t28-refund-shipping",
+    "kind": "refund_shipping",
+    "title": "Refund only the shipping charge",
+    "seed": 128,
+    "prompt": "Order #2621 (ORD-003431) in Fernhollow Apparel (STO-1) was delivered a week late. As an apology, refund the customer's full shipping charge ($6.95) — shipping only, no items.",
+    "params": {
+      "orderId": "ORD-003431"
+    }
+  },
+  {
+    "id": "t29-archive-completed-orders",
+    "kind": "close_fulfilled_orders",
+    "title": "Archive completed orders from a date window",
+    "seed": 129,
+    "prompt": "Housekeeping for Ridgeway Trail Supply (STO-3): archive (close) every open order placed between 2026-05-09 and 2026-05-11 (inclusive) that is fully fulfilled and fully paid (payment status \"paid\"). Do not change any other order.",
+    "params": {
+      "storeId": "STO-3",
+      "from": "2026-05-09",
+      "to": "2026-05-11",
+      "orderIds": [
+        "ORD-002653",
+        "ORD-002670",
+        "ORD-002685",
+        "ORD-002696",
+        "ORD-002697",
+        "ORD-002715",
+        "ORD-002717",
+        "ORD-002730",
+        "ORD-002739",
+        "ORD-002742",
+        "ORD-002746"
+      ]
+    }
+  },
+  {
+    "id": "t30-restock-low-inventory",
+    "kind": "restock_low_inventory",
+    "title": "Top up low stock for one vendor at one location",
+    "seed": 130,
+    "prompt": "A Northfield Linen restock arrived at Providence Warehouse (LOC-03) (Saltbox Home Goods (STO-2)). For every variant of an active Northfield Linen product that currently has fewer than 5 units available at that location, set its available quantity there to 20. Leave all other inventory unchanged.",
+    "params": {
+      "storeId": "STO-2",
+      "vendor": "Northfield Linen",
+      "locationId": "LOC-03",
+      "below": 5,
+      "target": 20,
+      "variantIds": [
+        "VAR-00795",
+        "VAR-00852",
+        "VAR-00891",
+        "VAR-00895",
+        "VAR-00932",
+        "VAR-00951",
+        "VAR-00973",
+        "VAR-01025",
+        "VAR-01028",
+        "VAR-01047"
+      ]
+    }
+  },
+  {
+    "id": "t31-tag-top-seller",
+    "kind": "tag_top_product",
+    "title": "Tag the best-selling product (analytics)",
+    "seed": 131,
+    "prompt": "Using the sales analytics for Fernhollow Apparel (STO-1), find the product with the most net units sold over the last 30 days (2026-05-17 to 2026-06-15, excluding cancelled orders and refunded units) and add the tag \"top-seller\" to it. No other product should carry that tag.",
+    "params": {
+      "storeId": "STO-1",
+      "tag": "top-seller",
+      "productId": "PRD-0008"
+    }
+  },
+  {
+    "id": "t32-flag-priority-order",
+    "kind": "order_note_tags",
+    "title": "Tag an order and add a note",
+    "seed": 132,
+    "prompt": "Flag order #2283 (ORD-004145) in Saltbox Home Goods (STO-2) for the warehouse: add the tag \"priority\" and set the order note to \"Ship before 2026-06-17 - customer travelling\". Do not fulfill it yet.",
+    "params": {
+      "orderId": "ORD-004145",
+      "tag": "priority",
+      "note": "Ship before 2026-06-17 - customer travelling"
+    }
+  }
+]

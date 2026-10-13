@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cartwright — e-commerce admin simulator</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b3fd6'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23f2a541' stroke-width='3'/%3E%3Cpath d='M16 7v18M7 16h18' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#5b3fd6"/><circle cx="16" cy="16" r="9" fill="none" stroke="#f2a541" stroke-width="3"/><path d="M16 7v18M7 16h18" stroke="#fff" stroke-width="2"/></svg>
+      <div><strong>Cartwright</strong><small>merchant admin simulator</small></div>
+    </div>
+    <nav id="nav">
+      <a href="#/home" data-route="home">Home</a>
+      <a href="#/orders" data-route="orders">Orders</a>
+      <a href="#/returns" data-route="returns">Returns</a>
+      <a href="#/products" data-route="products">Products</a>
+      <a href="#/inventory" data-route="inventory">Inventory</a>
+      <a href="#/collections" data-route="collections">Collections</a>
+      <a href="#/customers" data-route="customers">Customers</a>
+      <a href="#/discounts" data-route="discounts">Discounts</a>
+      <a href="#/analytics" data-route="analytics">Analytics</a>
+      <a href="#/storefront" data-route="storefront">Storefront ↗</a>
+      <a href="#/tasks" data-route="tasks">Agent tasks</a>
+      <a href="#/api" data-route="api">API</a>
+    </nav>
+    <div class="sim-box">
+      <div class="sim-clock" id="clock"></div>
+      <label>Seed <input id="seed-input" type="text" size="8"></label>
+      <button id="reset-btn" class="btn danger small">Reset to seed</button>
+      <div class="muted tiny" id="session-info"></div>
+    </div>
+  </aside>
+  <main>
+    <header class="topbar">
+      <h1 id="page-title">Home</h1>
+      <div class="top-controls">
+        <label>Store <select id="store-select"></select></label>
+      </div>
+    </header>
+    <section id="view"></section>
+  </main>
+  <div id="modal-root"></div>
+  <div id="toasts"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

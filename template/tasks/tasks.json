@@ -1,0 +1,12 @@
+[
+  {
+    "id": "t01-complete-item",
+    "kind": "complete_item",
+    "title": "Complete an open item",
+    "seed": 101,
+    "prompt": "Item Flange 107 (ITM-0125) is finished. Mark it done and change nothing else.",
+    "params": {
+      "itemId": "ITM-0125"
+    }
+  }
+]
